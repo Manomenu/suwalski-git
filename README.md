@@ -73,30 +73,17 @@ suwgit list
 | `suwgit daemon [--once]` | the loop systemd runs |
 | `suwgit uninstall [--purge]` | remove it from `PATH`, systemd and its logs; **keeps your config** unless `--purge` |
 
-## How the commit message is kept trustworthy
+## Good messages, not chatter
 
-The message is **not** scraped out of free text. The request carries a JSON
-schema (`response_format`), which vLLM enforces with grammar-constrained
-decoding: `categories` can only hold values from a fixed list, and
-`description` is its own field. The model cannot answer *"Sure! Here is your
-commit message: …"*, because the grammar does not allow it.
+The model is held to a fixed answer shape, so you get a commit message and
+nothing else — no "Sure, here you go!", no stray formatting, no essay. It also
+cannot invent its own labels: categories come from one fixed list, so
+`git log --grep '\[bugfix'` keeps working months later.
 
-Categories come from a closed vocabulary — `feature bugfix refactor docs test
-chore style perf build config remove` — so `git log --grep '\[bugfix'` keeps
-working.
-
-Thinking is switched off (`chat_template_kwargs.enable_thinking = false`).
-Naming a commit is not a reasoning task, and measured on a local Qwen3-8B with
-the same diff:
-
-| | completion tokens | wall time | result |
-|---|---|---|---|
-| thinking on | 952 | ~18 s | correct — but sometimes **empty**, reasoning ate the whole budget |
-| thinking off | 36 | 0.8 s | identical answer, every run |
-
-If your backend cannot do guided decoding, suwgit asks again in prose and falls
-back to parsing: `<think>` blocks, chatty preambles and code fences are all
-stripped rather than committed.
+```
+feature   bugfix   refactor   docs   test   chore
+style     perf     build      config remove
+```
 
 ## Configuration
 
@@ -120,24 +107,21 @@ stripped rather than committed.
 
 | key | meaning |
 |---|---|
-| `base_url` | used **exactly as written**, with `/chat/completions` appended — suwgit never adds `/v1` for you, so whatever `curl` reaches is what belongs here (worth checking if a reverse proxy rewrites paths) |
-| `api_key` | may stay empty; vLLM ignores it, and suwgit sends `Bearer dummy` so a proxy that insists on the header is satisfied |
-| `interval_hours` | how often the daemon sweeps; hours only |
-| `push` | push the branch after each commit, daemon sweeps included; `false` by default |
-| `max_diff_chars` | how much diff the model may see |
+| `base_url` | your server's address, written exactly as it works — suwgit uses it as given and adds nothing, so if it needs `/v1` on the end, put it there |
+| `model` | the model name your server reports |
+| `api_key` | can stay empty for a local server that does not check one |
+| `interval_hours` | how often to look; hours only |
+| `push` | push after each commit, sweeps included; off by default |
+| `max_diff_chars` | how much of the diff the model reads |
 
-**Sizing `max_diff_chars`:** code tokenises at roughly 3.8 characters per token,
-so a 200k-token context window holds about 740,000 characters of diff. The
-default of 400,000 uses a bit over half of that. Context is rarely the binding
-constraint — prefill time is, at roughly 75 s for 500,000 characters versus well
-under a second at normal sizes. The whole diff is sent whenever it fits; if it
-does not, the diff is clipped but `git status` is always sent in full, so the
-model still sees every filename that changed.
+The default `max_diff_chars` sends the whole diff in almost every case. Lower it
+if your model has a small context window, or if you would rather it read less
+and answer faster. When a diff is too big it gets trimmed, but the list of
+changed files is always sent, so the message still covers everything that moved.
 
-`init` can keep the config in a [GNU Stow](https://www.gnu.org/software/stow/)
-dotfiles tree instead of `~/.config` (set `DOTFILES` to point at it). suwgit
-follows the stow symlink when it writes, so registering a repository updates the
-tracked file directly without a re-stow.
+If you keep your dotfiles in a [GNU Stow](https://www.gnu.org/software/stow/)
+tree, `init` can put the config there instead of `~/.config`, and registering a
+repository updates the tracked file directly.
 
 ## Where things live
 
@@ -169,23 +153,9 @@ tracked file directly without a re-stow.
 - **It does not retry.** A failed sweep is not worth hammering a busy GPU for —
   the changes will still be there in 1.5 hours.
 - **It never commits into a mess.** A repository in the middle of a merge,
-  rebase, cherry-pick or bisect is skipped. One repository is touched at a time
-  (`flock`), so the daemon and a manual `suwgit commit` cannot race.
-
-## Development
-
-```bash
-./scripts/test-solution.sh    # ruff + pytest
-```
-
-The tests run against real git repositories in `tmp_path` and a stub HTTP server
-that speaks the vLLM dialect, so nothing needs a GPU. The parsing tests pin the
-cases that actually happen with small models: chatty preambles, `<think>`
-blocks, code fences, categories outside the enum, a server that rejects the
-schema, and a proxy that ignores it.
-
-`bin/suwgit` runs the package on the system `python3`. That is deliberate: a
-daemon should not stop working because a virtualenv went stale.
+  rebase, cherry-pick or bisect is left alone until you have finished. The
+  daemon and a manual `suwgit commit` can never collide over the same
+  repository.
 
 ## License
 
