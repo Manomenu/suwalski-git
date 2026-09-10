@@ -22,7 +22,14 @@ class _Handler(BaseHTTPRequestHandler):
     reply_status = 200
     calls: ClassVar[list] = []
     reply_body: ClassVar[dict] = {
-        "choices": [{"message": {"content": '{"categories":["bugfix"],"description":"fixed the off-by-one in the parser"}'}}]
+        "choices": [
+            {
+                "message": {
+                    "content": '{"categories":["bugfix"],"description":"fixed the off-by-one in the parser",'
+                    '"unsafe_for_commit":false,"unsafe_reason":""}'
+                }
+            }
+        ]
     }
 
     def do_POST(self):
@@ -58,9 +65,10 @@ def stub_server():
 def test_asks_the_server_and_returns_the_message(stub_server, tmp_path):
     config = LlmConfig(base_url=stub_server, model="qwen2.5-coder", api_key="k")
 
-    message = suggest_commit_message(config, _tree(tmp_path))
+    suggestion = suggest_commit_message(config, _tree(tmp_path))
 
-    assert message == "[bugfix] fixed the off-by-one in the parser"
+    assert suggestion.message == "[bugfix] fixed the off-by-one in the parser"
+    assert suggestion.unsafe is False
     assert _Handler.received["path"] == "/v1/chat/completions"
     assert _Handler.received["auth"] == "Bearer k"
     body = _Handler.received["body"]
@@ -114,11 +122,11 @@ def test_a_server_without_guided_decoding_is_asked_again_in_prose(stub_server, t
 
     monkeypatch.setattr(_Handler, "do_POST", refuse_schema)
     try:
-        message = suggest_commit_message(LlmConfig(base_url=stub_server, model="qwen"), _tree(tmp_path))
+        suggestion = suggest_commit_message(LlmConfig(base_url=stub_server, model="qwen"), _tree(tmp_path))
     finally:
         monkeypatch.setattr(_Handler, "do_POST", original)
 
-    assert message == "[feature] added a chart"
+    assert suggestion.message == "[feature] added a chart"
     assert len(_Handler.calls) == 2
     assert "response_format" not in _Handler.calls[1]
     assert "chat_template_kwargs" not in _Handler.calls[1]
@@ -131,8 +139,9 @@ def test_a_proxy_that_ignores_the_schema_still_yields_a_message(stub_server, tmp
         "reply_body",
         {"choices": [{"message": {"content": "<think>hmm</think>Here you go: [docs] documented the daemon"}}]},
     )
-    message = suggest_commit_message(LlmConfig(base_url=stub_server, model="qwen"), _tree(tmp_path))
-    assert message == "[docs] documented the daemon"
+    suggestion = suggest_commit_message(LlmConfig(base_url=stub_server, model="qwen"), _tree(tmp_path))
+    assert suggestion.message == "[docs] documented the daemon"
+    assert suggestion.unsafe is False  # a prose answer carries no verdict
 
 
 def test_server_error_is_llm_unavailable(stub_server, tmp_path, monkeypatch):

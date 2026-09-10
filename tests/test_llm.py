@@ -18,23 +18,23 @@ from suwgit.llm import (
 
 
 def test_structured_answer():
-    assert parse_structured('{"categories": ["feature"], "description": "added revenue chart to main page dashboard"}') == (
-        "[feature] added revenue chart to main page dashboard"
-    )
+    assert parse_structured(
+        '{"categories": ["feature"], "description": "added revenue chart to main page dashboard", "unsafe_for_commit": false, "unsafe_reason": ""}'
+    ).message == ("[feature] added revenue chart to main page dashboard")
 
 
 def test_structured_answer_with_several_categories():
     payload = '{"categories": ["refactor", "bugfix"], "description": "added builder schema and fixed main tab not opening"}'
-    assert parse_structured(payload) == "[refactor,bugfix] added builder schema and fixed main tab not opening"
+    assert parse_structured(payload).message == "[refactor,bugfix] added builder schema and fixed main tab not opening"
 
 
 def test_structured_answer_wrapped_in_a_think_block_and_fences():
     raw = '<think>Let me look at the diff…</think>\n```json\n{"categories":["docs"],"description":"documented the daemon"}\n```'
-    assert parse_structured(raw) == "[docs] documented the daemon"
+    assert parse_structured(raw).message == "[docs] documented the daemon"
 
 
 def test_structured_answer_with_a_category_outside_the_enum():
-    assert parse_structured('{"categories": ["wibble"], "description": "moved things around"}') == "[chore] moved things around"
+    assert parse_structured('{"categories": ["wibble"], "description": "moved things around"}').message == "[chore] moved things around"
 
 
 def test_structured_answer_missing_a_description_is_rejected():
@@ -52,34 +52,36 @@ def test_structured_answer_that_is_not_json_is_rejected():
 
 def test_chatty_preamble_is_thrown_away():
     raw = "Yeah, sure! Here is your commit message: [feature] added revenue chart to main page dashboard"
-    assert parse_free_text(raw) == "[feature] added revenue chart to main page dashboard"
+    assert parse_free_text(raw).message == "[feature] added revenue chart to main page dashboard"
 
 
 def test_preamble_on_its_own_line_is_thrown_away():
     raw = "Sure thing! Here you go:\n\n[refactor,bugfix] added builder schema and fixed main tab not opening\n\nLet me know if you want another."
-    assert parse_free_text(raw) == "[refactor,bugfix] added builder schema and fixed main tab not opening"
+    assert parse_free_text(raw).message == "[refactor,bugfix] added builder schema and fixed main tab not opening"
 
 
 def test_reasoning_block_is_thrown_away():
     raw = "<think>The user changed two files, so probably a bugfix.</think>\n[bugfix] fixed the off-by-one in the parser"
-    assert parse_free_text(raw) == "[bugfix] fixed the off-by-one in the parser"
+    assert parse_free_text(raw).message == "[bugfix] fixed the off-by-one in the parser"
 
 
 def test_unterminated_reasoning_block_is_thrown_away():
     raw = "Okay, thinking about this…</think>[docs] documented the daemon"
-    assert parse_free_text(raw) == "[docs] documented the daemon"
+    assert parse_free_text(raw).message == "[docs] documented the daemon"
 
 
 def test_json_in_a_free_text_answer_is_still_understood():
-    assert parse_free_text('Here you go:\n{"categories":["test"],"description":"covered the parser"}') == "[test] covered the parser"
+    assert (
+        parse_free_text('Here you go:\n{"categories":["test"],"description":"covered the parser"}').message == "[test] covered the parser"
+    )
 
 
 def test_quotes_and_fences_are_stripped():
-    assert parse_free_text('```\n"[bugfix]   fixed  the  thing."\n```') == "[bugfix] fixed the thing"
+    assert parse_free_text('```\n"[bugfix]   fixed  the  thing."\n```').message == "[bugfix] fixed the thing"
 
 
 def test_a_bare_sentence_gets_a_category():
-    assert parse_free_text("updated the readme") == "[chore] updated the readme"
+    assert parse_free_text("updated the readme").message == "[chore] updated the readme"
 
 
 def test_only_reasoning_is_rejected():

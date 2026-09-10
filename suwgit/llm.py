@@ -24,6 +24,7 @@ import json
 import re
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 
 from .config import LlmConfig
 from .gitops import WorkingTree
@@ -76,18 +77,25 @@ RESPONSE_SCHEMA = {
                     "items": {"type": "string", "enum": list(CATEGORIES)},
                 },
                 "description": {"type": "string"},
+                "unsafe_for_commit": {"type": "boolean"},
+                "unsafe_reason": {"type": "string"},
             },
-            "required": ["categories", "description"],
+            "required": ["categories", "description", "unsafe_for_commit", "unsafe_reason"],
             "additionalProperties": False,
         },
     },
 }
 
-SYSTEM_PROMPT = """You name git commits for a developer's working tree.
+SYSTEM_PROMPT = """You name git commits for a developer's working tree, and you check
+that the changes are safe to commit at all.
 
-Answer with a JSON object holding two fields:
+Answer with a JSON object holding four fields:
 - "categories": every kind of change that applies, from the allowed list
 - "description": what was actually done, plain English, at most 15 words
+- "unsafe_for_commit": true if the changes contain anything that must not go into
+  a git history, false otherwise
+- "unsafe_reason": when unsafe_for_commit is true, name what you found and the file
+  it is in, in one short sentence. Leave it as "" when false.
 
 Write the description as a developer would: say what changed and why it matters,
 never a file count, never a line count, no trailing period.
@@ -95,7 +103,27 @@ never a file count, never a line count, no trailing period.
 Good descriptions:
 - "added builder schema for raport creator and fixed main tab not opening"
 - "added revenue chart to main page dashboard"
+
+Set unsafe_for_commit to true for a real secret in the added lines: an API key,
+access token, bearer token, session cookie, password, database connection string
+with credentials in it, a private key block, a cloud provider credential, or a
+filled-in .env file.
+
+Set it to false for the ordinary things that only look alarming: the word
+"password" or "api_key" as a variable name, a placeholder like "dummy",
+"changeme", "xxx" or "your-key-here", an example or template file, a public key,
+a test fixture with an obviously fake value, or a key that is being REMOVED by
+this diff.
 """
+
+
+@dataclass
+class Suggestion:
+    """What the model made of the changes: a name, and whether they are safe to commit."""
+
+    message: str
+    unsafe: bool = False
+    unsafe_reason: str = ""
 
 
 class LlmUnavailable(Exception):
@@ -204,15 +232,23 @@ def parse_structured(content: str) -> str:
     categories = payload.get("categories") or []
     if isinstance(categories, str):
         categories = [c for c in re.split(r"[,\s]+", categories) if c]
-    return build(list(categories), payload.get("description", ""))
+
+    return Suggestion(
+        message=build(list(categories), payload.get("description", "")),
+        unsafe=bool(payload.get("unsafe_for_commit", False)),
+        unsafe_reason=" ".join(str(payload.get("unsafe_reason") or "").split()),
+    )
 
 
-def parse_free_text(content: str) -> str:
+def parse_free_text(content: str) -> Suggestion:
     """Dig a commit message out of unconstrained prose.
 
     Only used when the server cannot do guided decoding. Everything a chatty
     model puts around the answer — reasoning, "Sure! Here is your commit
     message:", code fences — is thrown away rather than committed.
+
+    A prose answer carries no secret-check flag, so this path returns `unsafe`
+    unset. Say so in the docs rather than pretend the check ran.
     """
     text = strip_reasoning(content).replace("```", " ")
     if not text.strip():
@@ -229,16 +265,16 @@ def parse_free_text(content: str) -> str:
         raw = match.group("cats").replace("/", ",")
         categories = [c.strip().lower() for c in raw.split(",")]
         if any(c in CATEGORIES for c in categories) and match.group("desc").strip():
-            return build(categories, match.group("desc"))
+            return Suggestion(build(categories, match.group("desc")))
 
     # No brackets at all: the answer is the last thing it said.
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if not lines:
         raise LlmUnavailable("model returned nothing usable")
-    return build([], lines[-1])
+    return Suggestion(build([], lines[-1]))
 
 
-def suggest_commit_message(config: LlmConfig, tree: WorkingTree) -> str:
+def suggest_commit_message(config: LlmConfig, tree: WorkingTree) -> Suggestion:
     """The whole point: uncommitted changes in, one commit message out."""
     if not config.is_configured:
         raise LlmUnavailable("LLM base_url/model not configured — run `suwgit init`")

@@ -5,7 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from suwgit import paths
+from suwgit import logs, paths
 
 
 @pytest.fixture
@@ -23,4 +23,7 @@ def sandbox(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "BIN_LINK", tmp_path / "bin" / "suwgit")
     monkeypatch.setattr(paths, "SYSTEMD_USER_DIR", tmp_path / "systemd")
     monkeypatch.setattr(paths, "SERVICE_FILE", tmp_path / "systemd" / "suwgit.service")
+    # The logger caches its handler; without this it stays bound to an earlier
+    # test's sandbox and writes there instead.
+    monkeypatch.setattr(logs, "_logger", None)
     return tmp_path

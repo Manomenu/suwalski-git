@@ -5,7 +5,7 @@ import subprocess
 
 from suwgit import committer, gitops
 from suwgit.config import Config, LlmConfig
-from suwgit.llm import LlmUnavailable
+from suwgit.llm import LlmUnavailable, Suggestion
 from suwgit.locking import repo_lock
 
 
@@ -24,7 +24,7 @@ def _config():
 
 def test_commits_with_the_suggested_message(sandbox, tmp_path, monkeypatch):
     repo = _repo(tmp_path / "repo")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: "[feature] added a file")
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[feature] added a file"))
 
     result = committer.commit_repo(_config(), repo)
 
@@ -67,7 +67,7 @@ def test_interrupted_rebase_is_skipped(sandbox, tmp_path, monkeypatch):
     gitops.commit_all(repo, "[chore] init")
     (repo / "a.txt").write_text("changed")
     (repo / ".git" / "MERGE_HEAD").write_text("deadbeef")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: "[chore] nope")
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[chore] nope"))
 
     result = committer.commit_repo(_config(), repo)
     assert result.committed is False
@@ -76,7 +76,7 @@ def test_interrupted_rebase_is_skipped(sandbox, tmp_path, monkeypatch):
 
 def test_a_locked_repository_is_left_to_the_other_process(sandbox, tmp_path, monkeypatch):
     repo = _repo(tmp_path / "repo")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: "[chore] should not happen")
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[chore] should not happen"))
 
     with repo_lock(repo):
         result = committer.commit_repo(_config(), repo)

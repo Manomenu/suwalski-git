@@ -26,6 +26,7 @@ class Result:
     commit: str = ""
     pushed: str = ""  # what the push did, empty if it did not happen
     push_error: str = ""  # why it did not, if it was meant to
+    unsafe: bool = False  # the model saw something that must not reach a git history
 
 
 def commit_repo(config: Config, root: Path, push: bool | None = None) -> Result:
@@ -57,7 +58,17 @@ def commit_repo(config: Config, root: Path, push: bool | None = None) -> Result:
             tree = gitops.read_working_tree(root, config.max_diff_chars)
 
             if tree.is_dirty:
-                message = suggest_commit_message(config.llm, tree)
+                suggestion = suggest_commit_message(config.llm, tree)
+
+                if suggestion.unsafe:
+                    # Refusing is the whole point: a secret in a git history is
+                    # not undone by a later commit, and the daemon commits
+                    # unattended, so this is the only moment anyone can stop it.
+                    reason = suggestion.unsafe_reason or "no reason given"
+                    log.warning("%s: REFUSED to commit — possible secret in the changes (%s)", root, reason)
+                    return Result(root, False, f"possible secret in the changes: {reason}", unsafe=True)
+
+                message = suggestion.message
                 commit = gitops.commit_all(root, message)
                 log.info("%s: committed %s %s", root, commit, message)
                 result = Result(root, True, "committed", message=message, commit=commit)

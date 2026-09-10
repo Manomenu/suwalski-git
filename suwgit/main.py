@@ -113,6 +113,13 @@ def cmd_commit(args: argparse.Namespace) -> int:
     push = True if getattr(args, "force_push", False) else args.push
     print(f"{DIM}asking {config.llm.model or 'the model'} about {root}…{RESET}")
     result = commit_repo(config, root, push=push)
+
+    if result.unsafe:
+        print(f"{RED}✗ refused to commit{RESET} {root}", file=sys.stderr)
+        print(f"  {BOLD}{result.reason}{RESET}", file=sys.stderr)
+        print(f"  {DIM}Nothing was committed. Check the changes, and commit by hand if this is a false alarm.{RESET}", file=sys.stderr)
+        return 1
+
     if not result.committed and not result.pushed and not result.push_error:
         return _fail(f"{root}: {result.reason}")
 

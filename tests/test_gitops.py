@@ -112,3 +112,19 @@ def test_remotes(tmp_path):
     assert gitops.remotes(repo) == []
     subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", "git@example.com:x/y.git"], check=True)
     assert gitops.remotes(repo) == ["origin"]
+
+
+def test_files_inside_a_new_directory_are_visible(tmp_path):
+    """git collapses an untracked directory to one line; the model needs the files."""
+    repo = _repo(tmp_path / "repo")
+    (repo / "keep.txt").write_text("x")
+    gitops.commit_all(repo, "[chore] init")
+
+    nested = repo / "deploy" / "conf"
+    nested.mkdir(parents=True)
+    (nested / "settings.py").write_text("TIMEOUT = 30\n")
+
+    tree = gitops.read_working_tree(repo)
+
+    assert "deploy/conf/settings.py" in tree.status
+    assert "TIMEOUT = 30" in tree.diff

@@ -85,6 +85,26 @@ feature   bugfix   refactor   docs   test   chore
 style     perf     build      config remove
 ```
 
+## It stops before committing a secret
+
+Every time it looks at your changes, the model is also asked whether they are
+safe to commit at all. If it spots an API key, an access token, a password, a
+private key or a filled-in `.env`, **nothing is committed and nothing is
+pushed** — the changes stay in your working tree and the reason goes to the log:
+
+```
+WARNING  ~/projects/api: REFUSED to commit — possible secret in the changes
+         (secrets/prod.env contains a real OpenAI API key in the added lines)
+```
+
+A secret in a git history is not undone by a later commit, and the daemon
+commits while you are not watching, so this is the one moment anything can stop
+it. Placeholders, `.env.example` files and variables merely *named* `api_key`
+are left alone.
+
+Treat it as a safety net, not a guarantee: it is a language model's judgement,
+so it will not catch everything. Keep your `.gitignore` honest.
+
 ## Configuration
 
 `~/.config/suwgit/config.json`:

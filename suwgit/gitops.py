@@ -118,7 +118,9 @@ def read_working_tree(root: Path, max_diff_chars: int = DEFAULT_MAX_DIFF_CHARS) 
     full, so even a clipped diff leaves the model every filename that changed.
     (`--stat` covers tracked changes only — an untracked file has no stat line.)
     """
-    status = _git(root, "status", "--porcelain")
+    # -uall, not the default: git otherwise collapses a new directory to a single
+    # "?? deploy/" line, and every file inside it stays invisible to the model.
+    status = _git(root, "status", "--porcelain", "--untracked-files=all")
     base = ["diff", "HEAD"] if has_head(root) else ["diff"]
     stat = _git(root, *base, "--stat")
     diff = _git(root, *base)

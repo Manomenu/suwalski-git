@@ -11,6 +11,7 @@ import pytest
 
 from suwgit import committer, gitops
 from suwgit.config import Config, LlmConfig
+from suwgit.llm import Suggestion
 
 
 def _remote(path):
@@ -47,7 +48,7 @@ def repo_with_remote(tmp_path):
 def test_commit_and_push_reaches_the_remote(sandbox, repo_with_remote, monkeypatch):
     remote, work = repo_with_remote
     (work / "b.txt").write_text("more")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: "[feature] added b")
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[feature] added b"))
 
     result = committer.commit_repo(_config(push=True), work)
 
@@ -58,7 +59,7 @@ def test_commit_and_push_reaches_the_remote(sandbox, repo_with_remote, monkeypat
 def test_push_off_leaves_the_commit_local(sandbox, repo_with_remote, monkeypatch):
     remote, work = repo_with_remote
     (work / "b.txt").write_text("more")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: "[feature] added b")
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[feature] added b"))
 
     result = committer.commit_repo(_config(push=False), work)
 
@@ -76,7 +77,7 @@ def test_a_rejected_push_keeps_the_commit(sandbox, repo_with_remote, monkeypatch
     subprocess.run(["git", "-C", str(other), "push", "-q"], check=True)
 
     (work / "b.txt").write_text("more")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: "[feature] added b")
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[feature] added b"))
 
     result = committer.commit_repo(_config(push=True), work)
 
@@ -91,7 +92,7 @@ def test_an_unreachable_remote_is_not_fatal(sandbox, repo_with_remote, monkeypat
     _remote_unused, work = repo_with_remote
     subprocess.run(["git", "-C", str(work), "remote", "set-url", "origin", "/nonexistent/remote.git"], check=True)
     (work / "b.txt").write_text("more")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: "[feature] added b")
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[feature] added b"))
 
     result = committer.commit_repo(_config(push=True), work)
 
@@ -103,7 +104,7 @@ def test_a_new_branch_gets_its_upstream_set(sandbox, repo_with_remote, monkeypat
     remote, work = repo_with_remote
     subprocess.run(["git", "-C", str(work), "checkout", "-q", "-b", "feature/x"], check=True)
     (work / "b.txt").write_text("more")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: "[feature] added b")
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[feature] added b"))
 
     result = committer.commit_repo(_config(push=True), work)
 
@@ -117,7 +118,7 @@ def test_a_detached_head_is_not_pushed(sandbox, repo_with_remote, monkeypatch):
     head = subprocess.run(["git", "-C", str(work), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
     subprocess.run(["git", "-C", str(work), "checkout", "-q", head], check=True)
     (work / "b.txt").write_text("more")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: "[feature] added b")
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[feature] added b"))
 
     result = committer.commit_repo(_config(push=True), work)
 
@@ -128,7 +129,7 @@ def test_a_detached_head_is_not_pushed(sandbox, repo_with_remote, monkeypatch):
 def test_the_call_can_override_the_config(sandbox, repo_with_remote, monkeypatch):
     remote, work = repo_with_remote
     (work / "b.txt").write_text("more")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: "[feature] added b")
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[feature] added b"))
 
     result = committer.commit_repo(_config(push=False), work, push=True)
 
@@ -159,7 +160,7 @@ def test_a_push_that_failed_earlier_goes_out_on_the_next_sweep(sandbox, repo_wit
     remote, work = repo_with_remote
     subprocess.run(["git", "-C", str(work), "remote", "set-url", "origin", "/nonexistent.git"], check=True)
     (work / "b.txt").write_text("more")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: "[feature] added b")
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[feature] added b"))
 
     first = committer.commit_repo(_config(push=True), work)
     assert first.committed and first.push_error
@@ -174,7 +175,7 @@ def test_a_push_that_failed_earlier_goes_out_on_the_next_sweep(sandbox, repo_wit
 
 def test_a_clean_and_fully_pushed_repo_does_nothing(sandbox, repo_with_remote, monkeypatch):
     _remote_unused, work = repo_with_remote
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: "[chore] nope")
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[chore] nope"))
 
     result = committer.commit_repo(_config(push=True), work)
 
@@ -187,7 +188,7 @@ def test_pending_is_not_counted_when_pushing_is_off(sandbox, repo_with_remote, m
     _remote_unused, work = repo_with_remote
     (work / "b.txt").write_text("more")
     gitops.commit_all(work, "[chore] committed by hand")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: "[chore] nope")
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[chore] nope"))
 
     result = committer.commit_repo(_config(push=False), work)
 
@@ -204,7 +205,7 @@ def test_a_rejection_is_explained_in_one_line(sandbox, repo_with_remote, monkeyp
     subprocess.run(["git", "-C", str(other), "push", "-q"], check=True)
 
     (work / "b.txt").write_text("more")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: "[feature] added b")
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[feature] added b"))
 
     result = committer.commit_repo(_config(push=True), work)
 
