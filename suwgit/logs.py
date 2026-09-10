@@ -7,17 +7,68 @@ the daemon touches reports through here.
 
 from __future__ import annotations
 
+import fcntl
 import logging
+import os
 import subprocess
 import sys
-from logging.handlers import RotatingFileHandler
 
 from . import paths
 
-MAX_BYTES = 2_000_000
-BACKUP_COUNT = 3
+# One capped file, no .1/.2/.3 siblings. When it fills up the oldest lines go.
+MAX_BYTES = 5_000_000
+# How much survives a trim. Half, so trimming happens rarely rather than on
+# every line once the cap is reached.
+KEEP_FRACTION = 0.5
 
 _logger: logging.Logger | None = None
+
+
+class CappedFileHandler(logging.Handler):
+    """Append-only log with a hard size cap, safe for several processes.
+
+    The daemon and an interactive `suwgit commit` write to the same file at the
+    same time. `RotatingFileHandler` cannot survive that — one process renames
+    the file while the other still holds the old inode open, and those lines are
+    lost at the next rotation. So this handler opens the file fresh for every
+    record (a handful per sweep — the cost is irrelevant) and takes a lock
+    around the write, which makes the trim atomic for every writer.
+    """
+
+    def __init__(self, filename, max_bytes: int = MAX_BYTES) -> None:
+        super().__init__()
+        self.filename = filename
+        self.max_bytes = max_bytes
+        self.lock_file = filename.with_suffix(filename.suffix + ".lock")
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            line = self.format(record) + "\n"
+            with self.lock_file.open("w", encoding="utf-8") as guard:
+                fcntl.flock(guard, fcntl.LOCK_EX)
+                try:
+                    with self.filename.open("a", encoding="utf-8") as handle:
+                        handle.write(line)
+                    if self.filename.stat().st_size > self.max_bytes:
+                        self._trim()
+                finally:
+                    fcntl.flock(guard, fcntl.LOCK_UN)
+        except OSError:
+            self.handleError(record)
+
+    def _trim(self) -> None:
+        """Drop the oldest lines, keeping the newest KEEP_FRACTION of the cap."""
+        keep_bytes = int(self.max_bytes * KEEP_FRACTION)
+        with self.filename.open("rb") as handle:
+            handle.seek(-keep_bytes, os.SEEK_END)
+            handle.readline()  # discard the half line we landed in the middle of
+            tail = handle.read()
+
+        tmp = self.filename.with_suffix(self.filename.suffix + ".trim")
+        with tmp.open("wb") as handle:
+            handle.write(b"... older entries dropped: the log is capped at %d bytes\n" % self.max_bytes)
+            handle.write(tail)
+        tmp.replace(self.filename)
 
 
 def logger() -> logging.Logger:
@@ -27,7 +78,7 @@ def logger() -> logging.Logger:
         return _logger
 
     paths.STATE_DIR.mkdir(parents=True, exist_ok=True)
-    handler = RotatingFileHandler(paths.LOG_FILE, maxBytes=MAX_BYTES, backupCount=BACKUP_COUNT, encoding="utf-8")
+    handler = CappedFileHandler(paths.LOG_FILE)
     handler.setFormatter(logging.Formatter("%(asctime)s  %(levelname)-7s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
 
     log = logging.getLogger("suwgit")

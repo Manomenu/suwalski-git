@@ -105,7 +105,7 @@ header is still satisfied.
 |-------------|-------|
 | config      | `~/.config/suwgit/config.json` — in dotfiles mode a stow symlink into `~/.dotfiles/fedora/.config/suwgit/` |
 | API key     | `~/.local/state/suwgit/api_key`, chmod 600, **never** in the config file (that file may be tracked by git) |
-| log         | `~/.local/state/suwgit/suwgit.log`, rotating, 2 MB × 3 |
+| log         | `~/.local/state/suwgit/suwgit.log`, one file, hard-capped at 5 MB |
 | locks       | `~/.local/state/suwgit/locks/` |
 | unit        | `~/.config/systemd/user/suwgit.service` |
 

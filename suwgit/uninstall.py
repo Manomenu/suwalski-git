@@ -28,7 +28,8 @@ def _exists(path: Path) -> bool:
 
 def runtime_targets() -> list[Path]:
     """What suwgit generated while running: logs and locks. Always removed."""
-    return [path for path in (paths.LOG_FILE, paths.LOCK_DIR) if _exists(path)]
+    log_lock = paths.LOG_FILE.with_suffix(paths.LOG_FILE.suffix + ".lock")
+    return [path for path in (paths.LOG_FILE, log_lock, paths.LOCK_DIR) if _exists(path)]
 
 
 def config_targets() -> list[Path]:
