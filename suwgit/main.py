@@ -80,6 +80,7 @@ def cmd_list(_args: argparse.Namespace) -> int:
     print(f"{BOLD}config{RESET}   {config_module.source_file()}")
     print(f"{BOLD}model{RESET}    {config.llm.model or '—'} {DIM}@ {config.llm.base_url or '—'}{RESET}")
     print(f"{BOLD}sweep{RESET}    every {config.interval_hours:g} h   {DIM}service: {install.service_status()}{RESET}")
+    print(f"{BOLD}push{RESET}     {'yes, after every commit' if config.push else 'no, commits stay local'}")
     print(f"{BOLD}log{RESET}      {paths.LOG_FILE}")
     print(f"\n{BOLD}registered{RESET}")
     if not config.repos:
@@ -109,13 +110,22 @@ def cmd_commit(args: argparse.Namespace) -> int:
     except config_module.ConfigError as exc:
         return _fail(str(exc))
 
+    push = True if getattr(args, "force_push", False) else args.push
     print(f"{DIM}asking {config.llm.model or 'the model'} about {root}…{RESET}")
-    result = commit_repo(config, root)
-    if not result.committed:
+    result = commit_repo(config, root, push=push)
+    if not result.committed and not result.pushed and not result.push_error:
         return _fail(f"{root}: {result.reason}")
 
-    print(f"{GREEN}✓{RESET} {root}  {DIM}{result.commit}{RESET}")
-    print(f"  {BOLD}{result.message}{RESET}")
+    if result.committed:
+        print(f"{GREEN}✓{RESET} {root}  {DIM}{result.commit}{RESET}")
+        print(f"  {BOLD}{result.message}{RESET}")
+    else:
+        print(f"{GREEN}✓{RESET} {root}  {DIM}nothing to commit — {result.reason}{RESET}")
+    if result.pushed:
+        print(f"  {DIM}{result.pushed}{RESET}")
+    if result.push_error:
+        print(f"  {RED}✗{RESET} committed, but the push failed: {result.push_error}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -167,7 +177,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     commit = sub.add_parser("commit", help="commit the closest repository above a path, right now")
     commit.add_argument("path", nargs="?", default=".")
+    push_choice = commit.add_mutually_exclusive_group()
+    push_choice.add_argument("--push", action="store_true", default=None, help="push afterwards, whatever the config says")
+    push_choice.add_argument("--no-push", dest="push", action="store_false", help="commit only, whatever the config says")
     commit.set_defaults(func=cmd_commit)
+
+    # The same thing with the push forced on, for when that is what you mean.
+    push_cmd = sub.add_parser("push", help="commit and push the closest repository above a path")
+    push_cmd.add_argument("path", nargs="?", default=".")
+    push_cmd.set_defaults(func=cmd_commit, push=True, force_push=True)
 
     daemon_cmd = sub.add_parser("daemon", help="the background loop (systemd runs this)")
     daemon_cmd.add_argument("--once", action="store_true", help="one sweep, then exit")

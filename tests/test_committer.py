@@ -83,3 +83,14 @@ def test_a_locked_repository_is_left_to_the_other_process(sandbox, tmp_path, mon
 
     assert result.committed is False
     assert "already working" in result.reason
+
+
+def test_a_sweep_reports_commits_and_pushes_separately(sandbox, tmp_path, monkeypatch):
+    from suwgit import config as config_module
+    from suwgit import daemon
+
+    repo = _repo(tmp_path / "repo")
+    gitops.commit_all(repo, "[chore] init")
+    monkeypatch.setattr(config_module, "load", lambda: Config(repos=[str(repo)]))
+
+    assert daemon.run_once() == (0, 0)

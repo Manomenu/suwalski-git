@@ -102,6 +102,7 @@ def run() -> int:
     print(f"\n{BOLD}Daemon{RESET}")
     interval_hours = _ask_hours(existing.interval_hours or DEFAULT_INTERVAL_HOURS)
     open_on_system_start = _ask_yes_no("  Start with the system?", existing.open_on_system_start)
+    push = _ask_yes_no("  Push the branch after committing?", existing.push)
 
     config = Config(
         llm=config_module.LlmConfig(
@@ -112,6 +113,8 @@ def run() -> int:
         ),
         interval_hours=interval_hours,
         open_on_system_start=open_on_system_start,
+        push=push,
+        max_diff_chars=existing.max_diff_chars,
         repos=existing.repos,
     )
     _, detail = _place_config(config, use_dotfiles)

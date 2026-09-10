@@ -43,6 +43,9 @@ class Config:
     llm: LlmConfig = field(default_factory=LlmConfig)
     interval_hours: float = DEFAULT_INTERVAL_HOURS
     open_on_system_start: bool = True
+    # Push the branch after committing. Off by default: committing for you is
+    # one thing, publishing on your behalf is another.
+    push: bool = False
     # How much diff the model may see. Raise it for a big context window, lower
     # it for a small one; the whole diff is sent when it fits.
     max_diff_chars: int = DEFAULT_MAX_DIFF_CHARS
@@ -109,6 +112,7 @@ def load() -> Config:
         ),
         interval_hours=float(raw.get("interval_hours", DEFAULT_INTERVAL_HOURS)),
         open_on_system_start=bool(raw.get("open_on_system_start", True)),
+        push=bool(raw.get("push", False)),
         max_diff_chars=int(raw.get("max_diff_chars", DEFAULT_MAX_DIFF_CHARS)),
         repos=[str(p) for p in raw.get("repos", [])],
     )

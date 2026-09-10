@@ -133,6 +133,88 @@ def read_working_tree(root: Path, max_diff_chars: int = DEFAULT_MAX_DIFF_CHARS) 
     return WorkingTree(root=root, status=status, stat=stat, diff=diff)
 
 
+def current_branch(root: Path) -> str | None:
+    """The checked-out branch, or None on a detached HEAD (nothing to push to)."""
+    try:
+        return _git(root, "symbolic-ref", "--quiet", "--short", "HEAD").strip() or None
+    except GitError:
+        return None
+
+
+def upstream_of(root: Path, branch: str) -> str | None:
+    try:
+        return _git(root, "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}").strip() or None
+    except GitError:
+        return None
+
+
+def pending_commits(root: Path) -> int:
+    """How many commits on HEAD have reached no remote yet.
+
+    `HEAD --not --remotes` rather than `@{upstream}..HEAD`, so it is right for a
+    branch with no upstream too (everything is pending), and does not re-push a
+    commit that already landed on some other remote branch.
+    """
+    if not has_head(root):
+        return 0
+    try:
+        return int(_git(root, "rev-list", "--count", "HEAD", "--not", "--remotes").strip())
+    except (GitError, ValueError):
+        return 0
+
+
+def _explain_push_failure(detail: str) -> str:
+    """Turn git's multi-line rejection into one line that says what to do.
+
+    git is talkative when it refuses a push — seven lines of `hint:` about
+    running `git pull`. That is good advice for a human at a terminal and noise
+    in a daemon log, where the only question is why the commit is still local.
+    """
+    lines = [line.strip() for line in detail.splitlines() if line.strip() and not line.startswith("hint:")]
+    text = " ".join(lines)
+    low = text.lower()
+
+    if "[rejected]" in low or "non-fast-forward" in low or "fetch first" in low:
+        return (
+            "rejected as non-fast-forward — the remote has commits this clone does not. "
+            "suwgit never force-pushes and never pulls on your behalf: resolve it yourself "
+            "(e.g. git pull --rebase), and the commit goes out on the next sweep"
+        )
+    if "permission denied" in low or "publickey" in low or "authentication failed" in low:
+        return f"authentication failed (is the SSH agent reachable from the daemon?): {text}"
+    if "could not read from remote" in low or "does not appear to be a git repository" in low:
+        return f"remote unreachable: {text}"
+    return text
+
+
+def push(root: Path) -> str:
+    """Push the current branch. Never forces, never rebases, never touches other branches.
+
+    A branch with no upstream gets one (`-u`), because a commit the daemon made
+    on a new local branch would otherwise sit there invisibly forever.
+    """
+    branch = current_branch(root)
+    if branch is None:
+        raise GitError("detached HEAD — no branch to push")
+
+    if upstream_of(root, branch):
+        try:
+            _git(root, "push")
+        except GitError as exc:
+            raise GitError(_explain_push_failure(str(exc))) from None
+        return f"pushed {branch}"
+
+    names = remotes(root)
+    if not names:
+        raise GitError("no remote to push to")
+    remote = "origin" if "origin" in names else names[0]
+    try:
+        _git(root, "push", "--set-upstream", remote, branch)
+    except GitError as exc:
+        raise GitError(_explain_push_failure(str(exc))) from None
+    return f"pushed {branch} and set its upstream to {remote}/{branch}"
+
+
 def commit_all(root: Path, message: str) -> str:
     """Stage everything and commit. Returns the new short hash."""
     _git(root, "add", "-A")

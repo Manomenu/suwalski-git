@@ -24,16 +24,28 @@ class Result:
     reason: str
     message: str = ""
     commit: str = ""
+    pushed: str = ""  # what the push did, empty if it did not happen
+    push_error: str = ""  # why it did not, if it was meant to
 
 
-def commit_repo(config: Config, root: Path) -> Result:
-    """Commit everything in `root` under an LLM-written message.
+def commit_repo(config: Config, root: Path, push: bool | None = None) -> Result:
+    """Commit everything in `root` under an LLM-written message, then push it.
+
+    A clean tree is not the end of the story: commits you made by hand, or ones
+    whose push failed on an earlier sweep, are still waiting to go out. So when
+    pushing is on, a repository with nothing to commit but something unpushed is
+    pushed anyway.
 
     Never raises for the ordinary failures — an unreachable server, a clean
-    tree, an interrupted rebase — because the daemon calls this in a loop and
-    one bad repository must not stop the others.
+    tree, an interrupted rebase, a rejected push — because the daemon calls this
+    in a loop and one bad repository must not stop the others.
+
+    `push` overrides the config for this one call; None means follow the config.
+    A failed push never undoes the commit: the work is safe locally either way,
+    and the next sweep pushes it along with whatever comes next.
     """
     log = logger()
+    should_push = config.push if push is None else push
 
     try:
         with repo_lock(root):
@@ -43,12 +55,33 @@ def commit_repo(config: Config, root: Path) -> Result:
                 return Result(root, False, f"{interrupted} in progress")
 
             tree = gitops.read_working_tree(root, config.max_diff_chars)
-            if not tree.is_dirty:
-                log.info("%s: nothing to commit", root)
-                return Result(root, False, "nothing to commit")
 
-            message = suggest_commit_message(config.llm, tree)
-            commit = gitops.commit_all(root, message)
+            if tree.is_dirty:
+                message = suggest_commit_message(config.llm, tree)
+                commit = gitops.commit_all(root, message)
+                log.info("%s: committed %s %s", root, commit, message)
+                result = Result(root, True, "committed", message=message, commit=commit)
+            else:
+                pending = gitops.pending_commits(root) if should_push else 0
+                if not pending:
+                    log.info("%s: nothing to commit", root)
+                    return Result(root, False, "nothing to commit")
+                log.info("%s: nothing to commit, but %d commit(s) not pushed yet", root, pending)
+                result = Result(root, False, f"{pending} commit(s) waiting to be pushed")
+
+            if not should_push:
+                return result
+
+            try:
+                result.pushed = gitops.push(root)
+            except gitops.GitError as exc:
+                result.push_error = str(exc)
+                log.warning("%s: could not push (%s)", root, exc)
+                return result
+
+            log.info("%s: %s", root, result.pushed)
+            return result
+
     except Busy as exc:
         log.info("%s: %s", root, exc)
         return Result(root, False, str(exc))
@@ -58,6 +91,3 @@ def commit_repo(config: Config, root: Path) -> Result:
     except gitops.GitError as exc:
         log.error("%s: git failed (%s)", root, exc)
         return Result(root, False, f"git failed: {exc}")
-
-    log.info("%s: committed %s %s", root, commit, message)
-    return Result(root, True, "committed", message=message, commit=commit)

@@ -13,8 +13,8 @@ happened, and commits it:
 ```
 
 No API keys to a cloud provider, no code leaving your network — it talks to a
-vLLM server you run. Nothing is pushed; the commits sit in your local history
-until you decide what to do with them.
+vLLM server you run. Pushing is opt-in: leave it off and the commits sit in your
+local history until you decide what to do with them.
 
 Or skip the waiting and commit right now, from anywhere inside the repository:
 
@@ -67,7 +67,8 @@ suwgit list
 | `suwgit register <folder>` | watch a repository (it must have a git remote) |
 | `suwgit unregister <folder>` | stop watching it |
 | `suwgit list` | config, service state, and which repositories are dirty |
-| `suwgit commit [path]` | commit the closest repository above `path` now, and print the message |
+| `suwgit commit [path]` | commit the closest repository above `path` now, and print the message (`--push` / `--no-push` override the config for one run) |
+| `suwgit push [path]` | the same thing with the push forced on |
 | `suwgit logs [-n N] [-f]` | the daemon log, through [`bat`](https://github.com/sharkdp/bat) if you have it |
 | `suwgit daemon [--once]` | the loop systemd runs |
 | `suwgit uninstall [--purge]` | remove it from `PATH`, systemd and its logs; **keeps your config** unless `--purge` |
@@ -111,6 +112,7 @@ stripped rather than committed.
   },
   "interval_hours": 1.5,
   "open_on_system_start": true,
+  "push": false,
   "max_diff_chars": 400000,
   "repos": []
 }
@@ -121,6 +123,7 @@ stripped rather than committed.
 | `base_url` | used **exactly as written**, with `/chat/completions` appended — suwgit never adds `/v1` for you, so whatever `curl` reaches is what belongs here (worth checking if a reverse proxy rewrites paths) |
 | `api_key` | may stay empty; vLLM ignores it, and suwgit sends `Bearer dummy` so a proxy that insists on the header is satisfied |
 | `interval_hours` | how often the daemon sweeps; hours only |
+| `push` | push the branch after each commit, daemon sweeps included; `false` by default |
 | `max_diff_chars` | how much diff the model may see |
 
 **Sizing `max_diff_chars`:** code tokenises at roughly 3.8 characters per token,
@@ -148,9 +151,18 @@ tracked file directly without a re-stow.
 
 ## What it deliberately does not do
 
-- **It does not push.** A remote is required at `register` time as a sanity
-  check — an unsynced scratch directory should not be auto-committed — but the
-  commits stay local. Pushing is yours to decide.
+- **It does not push unless you say so.** `push` is `false` by default:
+  committing for you is one thing, publishing on your behalf is another. With it
+  on, the current branch is pushed after every commit — daemon sweeps included —
+  and a branch with no upstream gets one, so a commit the daemon made on a new
+  branch does not sit there invisibly. A sweep also pushes a repository that has
+  **nothing to commit but something unpushed**, so commits you made by hand, and
+  ones whose push failed earlier, still go out.
+- **It never forces, and never pulls.** If the remote has moved on, the push is
+  rejected and that is where it stops: no `--force`, no automatic pull or
+  rebase, because a rebase conflict in an unattended daemon is how work gets
+  lost. The commit is safe locally and goes out with the next sweep, once you
+  have sorted the divergence yourself.
 - **It stays quiet.** The daemon never writes to a terminal. An unreachable
   server is a `WARNING` in the log and nothing else; your changes are left
   uncommitted and picked up on the next sweep.
