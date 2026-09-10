@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Punkt wejścia suwgit — to na to wskazuje symlink ~/.local/bin/suwgit.
+# Czysty python3 bez venva: pakiet nie ma zależności spoza stdlib, więc demon
+# działa nawet wtedy, gdy uv/pip w systemie się rozjadą.
+set -euo pipefail
+REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+exec python3 -c 'import sys; sys.path.insert(0, sys.argv.pop(1)); from suwgit.main import main; sys.exit(main())' "$REPO" "$@"

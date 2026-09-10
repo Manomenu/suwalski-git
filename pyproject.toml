@@ -1,0 +1,21 @@
+[project]
+name = "suwalski-git"
+version = "0.1.0"
+description = "Commits registered repositories under commit messages written by a local vLLM"
+requires-python = ">=3.12,<3.15"
+dependencies = []  # stdlib only — the daemon must not depend on a venv staying healthy
+
+[project.scripts]
+suwgit = "suwgit.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["suwgit"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
