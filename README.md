@@ -42,8 +42,8 @@ without asking you to stop what you are doing.
 ## Install
 
 ```bash
-git clone https://github.com/<you>/suwgit ~/repos/suwgit
-cd ~/repos/suwgit
+git clone https://github.com/Manomenu/suwalski-git ~/repos/suwalski-git
+cd ~/repos/suwalski-git
 ./bin/suwgit init
 ```
 
@@ -174,3 +174,7 @@ schema, and a proxy that ignores it.
 
 `bin/suwgit` runs the package on the system `python3`. That is deliberate: a
 daemon should not stop working because a virtualenv went stale.
+
+## License
+
+[MIT](LICENSE)
