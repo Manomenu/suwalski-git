@@ -12,7 +12,7 @@ from pathlib import Path
 
 # Fallback budget when no config is passed. The real one lives in the config,
 # because it depends entirely on the backend's context window — measured against
-# qwen38 on vllm-local-145, code tokenises at 3.78 chars/token, so its 200,100
+# Qwen3-8B, code tokenises at 3.78 chars/token, so a 200,100-token
 # window holds roughly 740,000 characters of diff before anything else.
 DEFAULT_MAX_DIFF_CHARS = 400_000
 MAX_UNTRACKED_FILES = 40

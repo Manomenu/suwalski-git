@@ -50,7 +50,7 @@ MAX_DESCRIPTION_CHARS = 210
 MAX_TOKENS = 3000
 
 # Qwen3 reasons before answering, and naming a commit is not a reasoning task:
-# measured against vllm-local-145 the same diff took 952 completion tokens and
+# measured against a local Qwen3-8B the same diff took 952 completion tokens and
 # ~18 s with thinking on (sometimes overrunning the budget and returning an EMPTY
 # message — a silently lost sweep), against 36 tokens and 0.8 s with it off, for
 # a byte-identical answer. vLLM forwards this to the chat template; a template

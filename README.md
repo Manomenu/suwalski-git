@@ -1,127 +1,164 @@
-# suwalski-git (`suwgit`)
+# suwgit
 
-A Fedora user daemon that commits for you. Register a repository, and every
-1.5 h (configurable) suwgit looks at the uncommitted changes, asks a local vLLM
-server to name them, and commits under that name:
+**Your working tree, committed for you, under a name a local LLM wrote.**
+
+Register a repository and forget about it. Every 1.5 hours a background daemon
+looks at whatever you have left uncommitted, asks your own vLLM server what
+happened, and commits it:
 
 ```
-[refactor,bugfix] added builder schema for raport creator and fixed main tab not opening
 [feature] added revenue chart to main page dashboard
+[refactor,bugfix] added builder schema for report creator and fixed main tab not opening
+[feature,refactor,bugfix] added csv export for revenue chart and removed broken tabs module
 ```
 
-Categories come from a closed list — `feature bugfix refactor docs test chore
-style perf build config remove` — so the history stays greppable.
+No API keys to a cloud provider, no code leaving your network — it talks to a
+vLLM server you run. Nothing is pushed; the commits sit in your local history
+until you decide what to do with them.
 
-## How the answer is kept trustworthy
+Or skip the waiting and commit right now, from anywhere inside the repository:
 
-The message is **not** scraped out of free text. The request carries a JSON
-schema (`response_format`), which vLLM enforces with grammar-constrained
-decoding: `categories` can only be values from the enum, `description` is its
-own field. A model cannot answer "Yeah, sure! Here is your commit message: …"
-because the grammar does not allow it.
+```console
+$ suwgit commit .
+✓ /home/you/projects/dashboard  99f8156
+  [feature,refactor,bugfix] added csv export for revenue chart and removed broken tabs module
+```
 
-Thinking is switched off (`chat_template_kwargs.enable_thinking = false`).
-Naming a commit is not a reasoning task, and measured against qwen38 on the same
-diff:
+## Why
 
-| | completion tokens | wall time | result |
-|---|---|---|---|
-| thinking on | 952 | ~18 s | correct, but sometimes **empty** — reasoning ate the whole budget |
-| thinking off | 36 | 0.8 s | byte-identical answer, every run |
+Uncommitted work is invisible work. It does not survive a bad rebase, it cannot
+be bisected, and "wip" tells you nothing six weeks later. suwgit turns the pile
+of changes you have not gotten around to committing into a readable history,
+without asking you to stop what you are doing.
 
-`parse_free_text` is the safety net for a backend that cannot do guided
-decoding: it strips `<think>` blocks, preambles and code fences and finds the
-message inside whatever came back.
+## Requirements
+
+- Linux with systemd (the daemon runs as a **user** service)
+- Python 3.12+ — **no dependencies**, standard library only
+- git
+- A [vLLM](https://github.com/vllm-project/vllm) server, or anything else that
+  speaks the OpenAI `/chat/completions` dialect
 
 ## Install
 
 ```bash
-git clone <remote> ~/repos/suwalski-git
-cd ~/repos/suwalski-git
-./bin/suwgit init          # interactive: config location, vLLM, interval, autostart
+git clone https://github.com/<you>/suwgit ~/repos/suwgit
+cd ~/repos/suwgit
+./bin/suwgit init
 ```
 
-`init` writes the config, symlinks `~/.local/bin/suwgit`, and installs
-`~/.config/systemd/user/suwgit.service`. Open a new terminal afterwards, then:
+`init` asks where to keep the config, for your server's URL and model, how often
+to sweep, and whether to start with your session. It then symlinks
+`~/.local/bin/suwgit` and installs a systemd user unit. Open a new terminal so
+the command is on your `PATH`, then:
 
 ```bash
-suwgit register ~/repos/some-project
+suwgit register ~/projects/dashboard
+suwgit list
 ```
+
+`init` is re-runnable — every prompt offers your current setting as its default.
 
 ## Commands
 
-| command                       | what it does |
-|-------------------------------|--------------|
-| `suwgit init`                 | interactive setup, re-runnable |
-| `suwgit register <folder>`    | watch a repository (it must have a git remote) |
-| `suwgit unregister <folder>`  | stop watching it |
-| `suwgit list`                 | config, service state, registered repositories and whether they are dirty |
-| `suwgit commit [path]`        | commit the closest repository above `path` now, and print the message |
-| `suwgit logs [-n N] [-f]`     | the daemon log, through `bat` when it is installed |
-| `suwgit daemon [--once]`      | the loop systemd runs |
-| `suwgit uninstall [--purge]`  | remove it from PATH, systemd and its logs; **keeps the config** unless `--purge` |
+| command | what it does |
+|---|---|
+| `suwgit init` | interactive setup; safe to run again |
+| `suwgit register <folder>` | watch a repository (it must have a git remote) |
+| `suwgit unregister <folder>` | stop watching it |
+| `suwgit list` | config, service state, and which repositories are dirty |
+| `suwgit commit [path]` | commit the closest repository above `path` now, and print the message |
+| `suwgit logs [-n N] [-f]` | the daemon log, through [`bat`](https://github.com/sharkdp/bat) if you have it |
+| `suwgit daemon [--once]` | the loop systemd runs |
+| `suwgit uninstall [--purge]` | remove it from `PATH`, systemd and its logs; **keeps your config** unless `--purge` |
 
-## Uninstalling
+## How the commit message is kept trustworthy
 
-```bash
-suwgit uninstall            # PATH symlink, systemd unit, logs and locks
-suwgit uninstall --purge    # the above, plus the config and the API key
-```
+The message is **not** scraped out of free text. The request carries a JSON
+schema (`response_format`), which vLLM enforces with grammar-constrained
+decoding: `categories` can only hold values from a fixed list, and
+`description` is its own field. The model cannot answer *"Sure! Here is your
+commit message: …"*, because the grammar does not allow it.
 
-It lists every path first and the confirmation defaults to **no**. The config
-survives by default, so reinstalling does not cost you the vLLM settings or the
-list of registered repositories. The clone and every commit suwgit has already
-made are never touched, and a real file at `~/.local/bin/suwgit` (as opposed to
-our own symlink) is left alone.
+Categories come from a closed vocabulary — `feature bugfix refactor docs test
+chore style perf build config remove` — so `git log --grep '\[bugfix'` keeps
+working.
 
-## Talking to vLLM
+Thinking is switched off (`chat_template_kwargs.enable_thinking = false`).
+Naming a commit is not a reasoning task, and measured on a local Qwen3-8B with
+the same diff:
 
-`base_url` is used **exactly as written**, with `/chat/completions` appended —
-suwgit never adds `/v1` for you, so whatever `curl` reaches is what to put in
-the config. Behind the Caddy proxy on `.145` the prefix already maps onto the
-vLLM root, so the config carries no `/v1`:
+| | completion tokens | wall time | result |
+|---|---|---|---|
+| thinking on | 952 | ~18 s | correct — but sometimes **empty**, reasoning ate the whole budget |
+| thinking off | 36 | 0.8 s | identical answer, every run |
+
+If your backend cannot do guided decoding, suwgit asks again in prose and falls
+back to parsing: `<think>` blocks, chatty preambles and code fences are all
+stripped rather than committed.
+
+## Configuration
+
+`~/.config/suwgit/config.json`:
 
 ```json
-"base_url": "http://100.92.219.27/vllm-local-145",
-"model": "qwen38"
+{
+  "llm": {
+    "base_url": "http://localhost:8000/v1",
+    "model": "qwen3-8b",
+    "api_key": "",
+    "timeout_seconds": 180
+  },
+  "interval_hours": 1.5,
+  "open_on_system_start": true,
+  "max_diff_chars": 400000,
+  "repos": []
+}
 ```
 
-Code tokenises at **3.78 chars/token** on qwen38 (measured), so its 200,100-token
-window holds roughly 740,000 characters of diff. `max_diff_chars` defaults to
-400,000 (~106k tokens, ~53 % of the window); prefill, not context, is the cost —
-about 75 s at 500k characters, versus under a second at normal sizes. Lower it
-for a backend with a smaller window; the whole diff is sent whenever it fits.
+| key | meaning |
+|---|---|
+| `base_url` | used **exactly as written**, with `/chat/completions` appended — suwgit never adds `/v1` for you, so whatever `curl` reaches is what belongs here (worth checking if a reverse proxy rewrites paths) |
+| `api_key` | may stay empty; vLLM ignores it, and suwgit sends `Bearer dummy` so a proxy that insists on the header is satisfied |
+| `interval_hours` | how often the daemon sweeps; hours only |
+| `max_diff_chars` | how much diff the model may see |
 
-If that rewrite is ever removed from Caddy, the URL becomes
-`http://100.92.219.27/vllm-local-145/v1`. `api_key` may stay empty: vLLM does
-not check it, and suwgit sends `Bearer dummy` so a proxy that insists on a
-header is still satisfied.
+**Sizing `max_diff_chars`:** code tokenises at roughly 3.8 characters per token,
+so a 200k-token context window holds about 740,000 characters of diff. The
+default of 400,000 uses a bit over half of that. Context is rarely the binding
+constraint — prefill time is, at roughly 75 s for 500,000 characters versus well
+under a second at normal sizes. The whole diff is sent whenever it fits; if it
+does not, the diff is clipped but `git status` is always sent in full, so the
+model still sees every filename that changed.
+
+`init` can keep the config in a [GNU Stow](https://www.gnu.org/software/stow/)
+dotfiles tree instead of `~/.config` (set `DOTFILES` to point at it). suwgit
+follows the stow symlink when it writes, so registering a repository updates the
+tracked file directly without a re-stow.
 
 ## Where things live
 
-| `max_diff_chars` | how much diff the model may see, `400_000` by default |
-
-| what        | where |
-|-------------|-------|
-| config      | `~/.config/suwgit/config.json` — in dotfiles mode a stow symlink into `~/.dotfiles/fedora/.config/suwgit/` |
-| API key     | `~/.local/state/suwgit/api_key`, chmod 600, **never** in the config file (that file may be tracked by git) |
-| log         | `~/.local/state/suwgit/suwgit.log`, one file, hard-capped at 5 MB |
-| locks       | `~/.local/state/suwgit/locks/` |
-| unit        | `~/.config/systemd/user/suwgit.service` |
+| what | where |
+|---|---|
+| config | `~/.config/suwgit/config.json`, or a stow symlink into your dotfiles |
+| API key | `~/.local/state/suwgit/api_key`, chmod 600 — **never** in the config file, which may be tracked by git |
+| log | `~/.local/state/suwgit/suwgit.log`, one file, hard-capped at 5 MB |
+| locks | `~/.local/state/suwgit/locks/` |
+| unit | `~/.config/systemd/user/suwgit.service` |
 
 ## What it deliberately does not do
 
 - **It does not push.** A remote is required at `register` time as a sanity
-  check (an unsynced scratch directory should not be auto-committed), but the
-  commits stay local — pushing is yours to decide.
+  check — an unsynced scratch directory should not be auto-committed — but the
+  commits stay local. Pushing is yours to decide.
 - **It stays quiet.** The daemon never writes to a terminal. An unreachable
-  vLLM server is a `WARNING` in the log and nothing else; the changes are left
+  server is a `WARNING` in the log and nothing else; your changes are left
   uncommitted and picked up on the next sweep.
 - **It does not retry.** A failed sweep is not worth hammering a busy GPU for —
-  the changes are still there in 1.5 h.
+  the changes will still be there in 1.5 hours.
 - **It never commits into a mess.** A repository in the middle of a merge,
-  rebase, cherry-pick or bisect is skipped, and one repository at a time is
-  touched (`flock`), so the daemon and a manual `suwgit commit` cannot race.
+  rebase, cherry-pick or bisect is skipped. One repository is touched at a time
+  (`flock`), so the daemon and a manual `suwgit commit` cannot race.
 
 ## Development
 
@@ -129,5 +166,11 @@ header is still satisfied.
 ./scripts/test-solution.sh    # ruff + pytest
 ```
 
-No runtime dependencies: `bin/suwgit` runs the package on the system `python3`,
-so the daemon does not care whether a venv is healthy.
+The tests run against real git repositories in `tmp_path` and a stub HTTP server
+that speaks the vLLM dialect, so nothing needs a GPU. The parsing tests pin the
+cases that actually happen with small models: chatty preambles, `<think>`
+blocks, code fences, categories outside the enum, a server that rejects the
+schema, and a proxy that ignores it.
+
+`bin/suwgit` runs the package on the system `python3`. That is deliberate: a
+daemon should not stop working because a virtualenv went stale.
