@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from suwgit import committer, gitops
+from suwgit import committer, gitops, repolog
 from suwgit.config import Config, LlmConfig
 from suwgit.llm import Suggestion
 
@@ -159,6 +159,11 @@ def test_a_clean_repo_with_unpushed_commits_is_pushed(sandbox, repo_with_remote,
 def test_a_push_that_failed_earlier_goes_out_on_the_next_sweep(sandbox, repo_with_remote, monkeypatch):
     remote, work = repo_with_remote
     subprocess.run(["git", "-C", str(work), "remote", "set-url", "origin", "/nonexistent.git"], check=True)
+    # Steady state: the blocker note is already ignored, so writing one when the
+    # push fails does not itself leave a change behind for the next sweep.
+    repolog.ignore_entry(work)
+    subprocess.run(["git", "-C", str(work), "add", ".gitignore"], check=True)
+    subprocess.run(["git", "-C", str(work), "commit", "-qm", "ignore suwgit notes"], check=True)
     (work / "b.txt").write_text("more")
     monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[feature] added b"))
 

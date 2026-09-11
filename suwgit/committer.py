@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import gitops
+from . import gitops, repolog
 from .config import Config
 from .llm import LlmUnavailable, suggest_commit_message
 from .locking import Busy, repo_lock
@@ -47,6 +47,12 @@ def commit_repo(config: Config, root: Path, push: bool | None = None, quiet_seco
     on the grounds that the work is still in progress. `suwgit commit` passes
     0 — asking for a commit by hand is the statement that you are done.
 
+    Anything that really blocks a repository — an unreachable model, a
+    suspected secret, a rejected push — is also written into `.gitsuw.log` in
+    the repository itself, where it is in front of you while you work there.
+    The note is deleted again the moment there is nothing left to do — whether
+    suwgit committed, or you committed by hand.
+
     `push` overrides the config for this one call; None means follow the config.
     A failed push never undoes the commit: the work is safe locally either way,
     and the next sweep pushes it along with whatever comes next.
@@ -82,16 +88,22 @@ def commit_repo(config: Config, root: Path, push: bool | None = None, quiet_seco
                     # unattended, so this is the only moment anyone can stop it.
                     reason = suggestion.unsafe_reason or "no reason given"
                     log.warning("%s: REFUSED to commit — possible secret in the changes (%s)", root, reason)
+                    repolog.record_blocker(root, f"refused to commit — possible secret in the changes: {reason}")
                     return Result(root, False, f"possible secret in the changes: {reason}", unsafe=True)
 
                 message = suggestion.message
                 commit = gitops.commit_all(root, message)
                 log.info("%s: committed %s %s", root, commit, message)
+                repolog.clear(root)
                 result = Result(root, True, "committed", message=message, commit=commit)
             else:
                 pending = gitops.pending_commits(root) if should_push else 0
                 if not pending:
+                    # Nothing left to do is also what a repository looks like
+                    # after you committed it yourself: whatever blocked suwgit
+                    # is over, so the note must not outlive it.
                     log.info("%s: nothing to commit", root)
+                    repolog.clear(root)
                     return Result(root, False, "nothing to commit")
                 log.info("%s: nothing to commit, but %d commit(s) not pushed yet", root, pending)
                 result = Result(root, False, f"{pending} commit(s) waiting to be pushed")
@@ -104,9 +116,11 @@ def commit_repo(config: Config, root: Path, push: bool | None = None, quiet_seco
             except gitops.GitError as exc:
                 result.push_error = str(exc)
                 log.warning("%s: could not push (%s)", root, exc)
+                repolog.record_blocker(root, f"could not push: {exc}")
                 return result
 
             log.info("%s: %s", root, result.pushed)
+            repolog.clear(root)
             return result
 
     except Busy as exc:
@@ -114,7 +128,9 @@ def commit_repo(config: Config, root: Path, push: bool | None = None, quiet_seco
         return Result(root, False, str(exc))
     except LlmUnavailable as exc:
         log.warning("%s: LLM unavailable, leaving changes uncommitted (%s)", root, exc)
+        repolog.record_blocker(root, f"LLM unavailable, changes left uncommitted: {exc}")
         return Result(root, False, f"LLM unavailable: {exc}")
     except gitops.GitError as exc:
         log.error("%s: git failed (%s)", root, exc)
+        repolog.record_blocker(root, f"git failed: {exc}")
         return Result(root, False, f"git failed: {exc}")
