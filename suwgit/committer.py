@@ -27,9 +27,10 @@ class Result:
     pushed: str = ""  # what the push did, empty if it did not happen
     push_error: str = ""  # why it did not, if it was meant to
     unsafe: bool = False  # the model saw something that must not reach a git history
+    deferred: bool = False  # left alone because the files are still being edited
 
 
-def commit_repo(config: Config, root: Path, push: bool | None = None) -> Result:
+def commit_repo(config: Config, root: Path, push: bool | None = None, quiet_seconds: float = 0.0) -> Result:
     """Commit everything in `root` under an LLM-written message, then push it.
 
     A clean tree is not the end of the story: commits you made by hand, or ones
@@ -40,6 +41,11 @@ def commit_repo(config: Config, root: Path, push: bool | None = None) -> Result:
     Never raises for the ordinary failures — an unreachable server, a clean
     tree, an interrupted rebase, a rejected push — because the daemon calls this
     in a loop and one bad repository must not stop the others.
+
+    `quiet_seconds` is the daemon's patience: a dirty repository whose files
+    were touched more recently than that is left alone until the next sweep,
+    on the grounds that the work is still in progress. `suwgit commit` passes
+    0 — asking for a commit by hand is the statement that you are done.
 
     `push` overrides the config for this one call; None means follow the config.
     A failed push never undoes the commit: the work is safe locally either way,
@@ -58,6 +64,16 @@ def commit_repo(config: Config, root: Path, push: bool | None = None) -> Result:
             tree = gitops.read_working_tree(root, config.max_diff_chars)
 
             if tree.is_dirty:
+                idle = gitops.seconds_since_last_change(root, tree.status)
+                if quiet_seconds and idle is not None and idle < quiet_seconds:
+                    log.info(
+                        "%s: still being edited (%.0f min ago, waiting for %.0f), leaving it for the next sweep",
+                        root,
+                        idle / 60,
+                        quiet_seconds / 60,
+                    )
+                    return Result(root, False, "changes are still warm", deferred=True)
+
                 suggestion = suggest_commit_message(config.llm, tree)
 
                 if suggestion.unsafe:

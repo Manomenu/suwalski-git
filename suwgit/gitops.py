@@ -7,6 +7,7 @@ machine where only git itself is installed.
 from __future__ import annotations
 
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -222,3 +223,43 @@ def commit_all(root: Path, message: str) -> str:
     _git(root, "add", "-A")
     _git(root, "commit", "-m", message)
     return _git(root, "rev-parse", "--short", "HEAD").strip()
+
+
+def _status_paths(status: str) -> list[str]:
+    """Every path named by `git status --porcelain` output.
+
+    Rename and copy entries carry two paths ("R  old -> new"); only the second
+    one exists on disk, so that is the one we keep.
+    """
+    names = []
+    for line in status.splitlines():
+        if len(line) < 4:
+            continue
+        entry = line[3:]
+        if " -> " in entry:
+            entry = entry.split(" -> ", 1)[1]
+        names.append(entry.strip().strip('"'))
+    return names
+
+
+def seconds_since_last_change(root: Path, status: str, now: float | None = None) -> float | None:
+    """How long ago the newest uncommitted file was touched, in seconds.
+
+    This is the daemon's "are they still typing?" test, so it looks at
+    modification times rather than at git: only files git already calls dirty
+    are considered, which keeps build output and ignored junk out of it.
+
+    None when nothing datable is left — every dirty path was deleted, or the
+    tree is clean. The caller reads that as "no reason to wait".
+    """
+    newest = None
+    for name in _status_paths(status):
+        try:
+            mtime = (root / name).stat().st_mtime
+        except OSError:
+            continue  # deleted, or a path we cannot stat — it says nothing about activity
+        if newest is None or mtime > newest:
+            newest = mtime
+    if newest is None:
+        return None
+    return max(0.0, (time.time() if now is None else now) - newest)

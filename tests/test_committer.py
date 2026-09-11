@@ -93,4 +93,4 @@ def test_a_sweep_reports_commits_and_pushes_separately(sandbox, tmp_path, monkey
     gitops.commit_all(repo, "[chore] init")
     monkeypatch.setattr(config_module, "load", lambda: Config(repos=[str(repo)]))
 
-    assert daemon.run_once() == (0, 0)
+    assert daemon.run_once() == (0, 0, 0)

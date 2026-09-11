@@ -3,8 +3,8 @@
 **Your working tree, committed for you, under a name a local LLM wrote.**
 
 Register a repository and forget about it. Every 1.5 hours a background daemon
-looks at whatever you have left uncommitted, asks your own vLLM server what
-happened, and commits it:
+looks at whatever you have left uncommitted, and — as long as you have stopped
+touching it — asks your own vLLM server what happened, and commits it:
 
 ```
 [feature] added revenue chart to main page dashboard
@@ -172,6 +172,13 @@ repository updates the tracked file directly.
   uncommitted and picked up on the next sweep.
 - **It does not retry.** A failed sweep is not worth hammering a busy GPU for —
   the changes will still be there in 1.5 hours.
+- **It does not commit while you are still working.** A sweep leaves a
+  repository alone if any uncommitted file was touched in the last three
+  quarters of the interval — 67 minutes at the default 1.5 hours. Committing
+  mid-edit gives you half a refactor under a message written about work that is
+  not done yet. Nothing is lost by waiting: the next sweep sees the same changes
+  plus whatever you added. `suwgit commit` by hand ignores this entirely —
+  asking for a commit is the statement that you are finished.
 - **It never commits into a mess.** A repository in the middle of a merge,
   rebase, cherry-pick or bisect is left alone until you have finished. The
   daemon and a manual `suwgit commit` can never collide over the same

@@ -24,6 +24,11 @@ DEFAULT_INTERVAL_HOURS = 1.5
 # A thinking model reasons before it answers: qwen3-8b takes ~30 s on a small diff.
 DEFAULT_TIMEOUT_SECONDS = 180
 DEFAULT_MAX_DIFF_CHARS = 400_000
+# A sweep leaves a repository alone while its files are still being touched.
+# Committing mid-edit yields half-finished commits described by a message
+# written about work that is not done yet. Three quarters of the interval, so a
+# repository that falls quiet just after one sweep is still caught by the next.
+QUIET_FRACTION = 0.75
 
 
 @dataclass
@@ -54,6 +59,11 @@ class Config:
     @property
     def interval_seconds(self) -> float:
         return self.interval_hours * 3600
+
+    @property
+    def quiet_seconds(self) -> float:
+        """How long a repository must sit untouched before a sweep commits it."""
+        return self.interval_seconds * QUIET_FRACTION
 
 
 class ConfigError(Exception):
