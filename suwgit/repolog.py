@@ -3,7 +3,7 @@
 The daemon is silent by design, and the central log at ~/.local/state mixes
 every repository together. But the question "why has this project not been
 committed for two days?" is asked while standing *in* that project, so the
-answer belongs there too: `.gitsuw.log` in the repository root, newest last,
+answer belongs there too: `.suwgit.log` in the repository root, newest last,
 the last few blockers and nothing else.
 
 Only real blockers are recorded — an unreachable model, a suspected secret, a
@@ -23,7 +23,7 @@ import subprocess
 import time
 from pathlib import Path
 
-LOG_NAME = ".gitsuw.log"
+LOG_NAME = ".suwgit.log"
 MAX_ENTRIES = 10
 HEADER = (
     f"# {LOG_NAME} — why suwgit did not commit this repository. Newest last, "

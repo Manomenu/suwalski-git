@@ -48,7 +48,7 @@ def commit_repo(config: Config, root: Path, push: bool | None = None, quiet_seco
     0 — asking for a commit by hand is the statement that you are done.
 
     Anything that really blocks a repository — an unreachable model, a
-    suspected secret, a rejected push — is also written into `.gitsuw.log` in
+    suspected secret, a rejected push — is also written into `.suwgit.log` in
     the repository itself, where it is in front of you while you work there.
     The note is deleted again the moment there is nothing left to do — whether
     suwgit committed, or you committed by hand.

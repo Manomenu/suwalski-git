@@ -151,7 +151,7 @@ repository updates the tracked file directly.
 | API key | `~/.local/state/suwgit/api_key`, chmod 600 — **never** in the config file, which may be tracked by git |
 | log | `~/.local/state/suwgit/suwgit.log`, one file, hard-capped at 5 MB |
 | locks | `~/.local/state/suwgit/locks/` |
-| blocker notes | `.gitsuw.log` in the repository itself — see below |
+| blocker notes | `.suwgit.log` in the repository itself — see below |
 | unit | `~/.config/systemd/user/suwgit.service` |
 
 ## When it cannot commit
@@ -159,10 +159,10 @@ repository updates the tracked file directly.
 A daemon that fails silently is a daemon you stop trusting. So when something
 really blocks a repository — the model is unreachable, a suspected secret is in
 the changes, the push is rejected — suwgit leaves a note **in that repository**,
-as `.gitsuw.log`:
+as `.suwgit.log`:
 
 ```
-# .gitsuw.log — why suwgit did not commit this repository. Newest last, at most 10 entries.
+# .suwgit.log — why suwgit did not commit this repository. Newest last, at most 10 entries.
 2026-09-11 08:25:12  LLM unavailable, changes left uncommitted: cannot reach http://vllm:8000  (×6)
 2026-09-11 14:10:03  refused to commit — possible secret in the changes: deploy/prod.env holds an API key
 ```
@@ -171,7 +171,7 @@ You notice a project has not been committed for days while you are standing in
 it, not while reading a central log — so the answer is kept where the question
 gets asked. The last ten blockers are kept; a blocker that keeps repeating is
 counted rather than repeated, so one server outage cannot push out the other
-nine things that went wrong. The first note also adds `.gitsuw.log` to the
+nine things that went wrong. The first note also adds `.suwgit.log` to the
 repository's `.gitignore`, creating that file if there is none — one ignored
 line is a smaller price than a blocker nobody hears about.
 

@@ -1,4 +1,4 @@
-"""`.gitsuw.log` — the note suwgit leaves inside a repository it could not commit.
+"""`.suwgit.log` — the note suwgit leaves inside a repository it could not commit.
 
 The point of the file is that it is where you are: you notice a project has not
 been committed for days while standing in it, not while reading the daemon's
@@ -53,7 +53,7 @@ def test_keeps_an_existing_gitignore_and_appends_once(tmp_path):
     assert (root / ".gitignore").read_text(encoding="utf-8") == f"*.pyc\n__pycache__/\n{repolog.LOG_NAME}\n"
 
 
-@pytest.mark.parametrize("existing", ["*.pyc\n.gitsuw.log\n", "/.gitsuw.log\n", "*.pyc\n.gitsuw.log"])
+@pytest.mark.parametrize("existing", ["*.pyc\n.suwgit.log\n", "/.suwgit.log\n", "*.pyc\n.suwgit.log"])
 def test_an_existing_ignore_rule_is_left_alone(tmp_path, existing):
     root = tmp_path / "repo"
     root.mkdir()
