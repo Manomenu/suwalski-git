@@ -18,6 +18,7 @@ After=network-online.target
 
 [Service]
 Type=simple
+Environment="PATH={path}"
 ExecStart={entrypoint} daemon
 Restart=always
 RestartSec=30
@@ -25,6 +26,19 @@ RestartSec=30
 [Install]
 WantedBy=default.target
 """
+
+
+def render_service() -> str:
+    """The unit, with the PATH of the shell running `suwgit init` baked in.
+
+    Commits run the repositories' git hooks (gitleaks, linters), which live
+    wherever the user installed them — ~/.nix-profile/bin, ~/.local/bin. The
+    systemd user manager's own PATH need not include those, and a daemon only
+    ever sees the PATH it started with, so a hook's tool goes missing and the
+    commit is refused.
+    """
+    path = os.environ.get("PATH", "/usr/local/bin:/usr/bin").replace("%", "%%")
+    return SERVICE_TEMPLATE.format(entrypoint=paths.ENTRYPOINT, path=path)
 
 
 def link_into_path() -> tuple[bool, str]:
@@ -62,7 +76,7 @@ def install_service(enable: bool) -> tuple[bool, str]:
         return False, "systemctl not found — autostart skipped, run `suwgit daemon` yourself"
 
     paths.SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
-    paths.SERVICE_FILE.write_text(SERVICE_TEMPLATE.format(entrypoint=paths.ENTRYPOINT), encoding="utf-8")
+    paths.SERVICE_FILE.write_text(render_service(), encoding="utf-8")
     _systemctl("daemon-reload")
 
     if not enable:
