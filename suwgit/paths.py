@@ -1,7 +1,12 @@
 """Where suwgit keeps its state on disk.
 
-XDG locations, so nothing lands in the repo and a daemon started by systemd
-finds exactly the same files as an interactive shell.
+Under the user profile, in the same ~/.config and ~/.local/state a Git Bash user
+already knows — and deliberately NOT under %APPDATA%: the Microsoft Store build
+of Python silently redirects writes there into its own package folder, so the
+file you open in an editor would not be the one suwgit reads.
+
+A scheduled run of suwgit finds exactly the same files as an interactive shell,
+because both resolve them from the same profile.
 """
 
 from __future__ import annotations
@@ -21,22 +26,18 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 STATE_DIR = _xdg("XDG_STATE_HOME", ".local/state") / "suwgit"
 LOG_FILE = STATE_DIR / "suwgit.log"
 LOCK_DIR = STATE_DIR / "locks"
-# The vLLM key never goes into the dotfiles repo — it stays here, chmod 600.
+# The vLLM key never goes into the config file — it stays here, in the profile.
 API_KEY_FILE = STATE_DIR / "api_key"
 
-# ~/.dotfiles is a stow tree: the `fedora` package is the one that gets stowed on
-# this machine, and suwgit (systemd, user units) is Fedora-only anyway.
-DOTFILES_DIR = Path(os.environ.get("DOTFILES", Path.home() / ".dotfiles")).expanduser()
-DOTFILES_PACKAGE = "fedora"
-DOTFILES_CONFIG_FILE = DOTFILES_DIR / DOTFILES_PACKAGE / ".config" / "suwgit" / "config.json"
-DOTFILES_APPLY = Path.home() / "scripts" / "fedora" / "dotfiles" / "apply.sh"
-
+# Two launchers, because Windows has two kinds of shell: Git Bash runs the
+# extensionless script, cmd and PowerShell pick up the .cmd. Symlinks would need
+# developer mode or an elevated prompt, so these are small generated files.
 BIN_DIR = Path.home() / ".local" / "bin"
-BIN_LINK = BIN_DIR / "suwgit"
+BASH_SHIM = BIN_DIR / "suwgit"
+CMD_SHIM = BIN_DIR / "suwgit.cmd"
 
-SYSTEMD_USER_DIR = _xdg("XDG_CONFIG_HOME", ".config") / "systemd" / "user"
-SERVICE_NAME = "suwgit.service"
-SERVICE_FILE = SYSTEMD_USER_DIR / SERVICE_NAME
+# The Task Scheduler entry that replaces the systemd unit of the Linux version.
+TASK_NAME = "suwgit"
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-ENTRYPOINT = REPO_ROOT / "bin" / "suwgit"
+ENTRYPOINT = REPO_ROOT / "bin" / "suwgit.py"

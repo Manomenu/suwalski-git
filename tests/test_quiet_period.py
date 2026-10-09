@@ -9,7 +9,7 @@ import os
 import subprocess
 import time
 
-from suwgit import committer, daemon, gitops
+from suwgit import committer, gitops, sweep
 from suwgit.config import QUIET_FRACTION, Config, LlmConfig
 from suwgit.llm import Suggestion
 
@@ -97,10 +97,10 @@ def test_quiet_period_is_three_quarters_of_the_interval(sandbox):
 def test_sweep_reports_deferred_repositories(sandbox, tmp_path, monkeypatch):
     repo = _repo(tmp_path / "repo")
     config = _config(repos=[str(repo)])
-    monkeypatch.setattr(daemon.config_module, "load", lambda: config)
+    monkeypatch.setattr(sweep.config_module, "load", lambda: config)
     monkeypatch.setattr(committer, "suggest_commit_message", _never_asked)
 
-    assert daemon.run_once() == (0, 0, 1)
+    assert sweep.run() == (0, 0, 1)
 
 
 def test_renamed_paths_are_dated_by_their_new_name(sandbox, tmp_path):

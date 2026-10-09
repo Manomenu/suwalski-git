@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 from . import config as config_module
-from . import daemon, gitops, initcmd, install, logs, paths, uninstall
+from . import gitops, initcmd, install, logs, paths, sweep, uninstall
 from .committer import commit_repo
 
 BOLD = "\033[1m"
@@ -77,9 +77,9 @@ def cmd_list(_args: argparse.Namespace) -> int:
     except config_module.ConfigError as exc:
         return _fail(str(exc))
 
-    print(f"{BOLD}config{RESET}   {config_module.source_file()}")
+    print(f"{BOLD}config{RESET}   {paths.CONFIG_FILE}")
     print(f"{BOLD}model{RESET}    {config.llm.model or '—'} {DIM}@ {config.llm.base_url or '—'}{RESET}")
-    print(f"{BOLD}sweep{RESET}    every {config.interval_hours:g} h   {DIM}service: {install.service_status()}{RESET}")
+    print(f"{BOLD}sweep{RESET}    every {config.interval_hours:g} h   {DIM}task: {install.task_status()}{RESET}")
     print(f"{BOLD}push{RESET}     {'yes, after every commit' if config.push else 'no, commits stay local'}")
     print(f"{BOLD}log{RESET}      {paths.LOG_FILE}")
     print(f"\n{BOLD}registered{RESET}")
@@ -112,7 +112,7 @@ def cmd_commit(args: argparse.Namespace) -> int:
 
     push = True if getattr(args, "force_push", False) else args.push
     print(f"{DIM}asking {config.llm.model or 'the model'} about {root}…{RESET}")
-    result = commit_repo(config, root, push=push)
+    result = commit_repo(config, root, push=push, prefix=args.prefix.strip())
 
     if result.unsafe:
         print(f"{RED}✗ refused to commit{RESET} {root}", file=sys.stderr)
@@ -136,11 +136,10 @@ def cmd_commit(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_daemon(args: argparse.Namespace) -> int:
-    if args.once:
-        daemon.run_once()
-        return 0
-    return daemon.run()
+def cmd_sweep(_args: argparse.Namespace) -> int:
+    committed, pushed, deferred = sweep.run()
+    print(f"{committed} committed, {pushed} pushed, {deferred} still being edited  {DIM}(details: suwgit logs){RESET}")
+    return 0
 
 
 def cmd_uninstall(args: argparse.Namespace) -> int:
@@ -170,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("init", help="interactive setup: LLM, interval, autostart, PATH").set_defaults(func=cmd_init)
+    sub.add_parser("init", help="interactive setup: LLM, interval, schedule, PATH (`just install`)").set_defaults(func=cmd_init)
 
     register = sub.add_parser("register", help="watch a repository (it must have a git remote)")
     register.add_argument("folder")
@@ -184,6 +183,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     commit = sub.add_parser("commit", help="commit the closest repository above a path, right now")
     commit.add_argument("path", nargs="?", default=".")
+    commit.add_argument("-p", "--prefix", default="", help="put this in front of the message, e.g. a ticket id: -p EH-3311111")
     push_choice = commit.add_mutually_exclusive_group()
     push_choice.add_argument("--push", action="store_true", default=None, help="push afterwards, whatever the config says")
     push_choice.add_argument("--no-push", dest="push", action="store_false", help="commit only, whatever the config says")
@@ -192,18 +192,17 @@ def build_parser() -> argparse.ArgumentParser:
     # The same thing with the push forced on, for when that is what you mean.
     push_cmd = sub.add_parser("push", help="commit and push the closest repository above a path")
     push_cmd.add_argument("path", nargs="?", default=".")
+    push_cmd.add_argument("-p", "--prefix", default="", help="put this in front of the message, e.g. a ticket id: -p EH-3311111")
     push_cmd.set_defaults(func=cmd_commit, push=True, force_push=True)
 
-    daemon_cmd = sub.add_parser("daemon", help="the background loop (systemd runs this)")
-    daemon_cmd.add_argument("--once", action="store_true", help="one sweep, then exit")
-    daemon_cmd.set_defaults(func=cmd_daemon)
+    sub.add_parser("sweep", help="one pass over every registered repository (the scheduled task runs this)").set_defaults(func=cmd_sweep)
 
-    uninstall_cmd = sub.add_parser("uninstall", help="remove suwgit from PATH and systemd, and its logs")
+    uninstall_cmd = sub.add_parser("uninstall", help="remove suwgit from PATH and the Task Scheduler, and its logs")
     uninstall_cmd.add_argument("--purge", action="store_true", help="also delete the config and the API key")
     uninstall_cmd.add_argument("-y", "--yes", action="store_true", help="skip the confirmation")
     uninstall_cmd.set_defaults(func=cmd_uninstall)
 
-    logs_cmd = sub.add_parser("logs", help="show the daemon log")
+    logs_cmd = sub.add_parser("logs", help="show the sweep log")
     logs_cmd.add_argument("-n", "--lines", type=int, default=200)
     logs_cmd.add_argument("-f", "--follow", action="store_true")
     logs_cmd.set_defaults(func=cmd_logs)

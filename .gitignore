@@ -1,5 +1,13 @@
+# Python
+.venv/
 __pycache__/
-*.pyc
+*.py[cod]
 .pytest_cache/
 .ruff_cache/
-.venv/
+
+# Agents' scratch space
+.claude/worktrees/
+scratchpad/
+
+# suwgit's own blocker note, should it ever sweep this clone
+.suwgit.log

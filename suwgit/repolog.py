@@ -1,6 +1,6 @@
 """A short note left inside a repository saying why suwgit could not commit it.
 
-The daemon is silent by design, and the central log at ~/.local/state mixes
+A scheduled sweep is silent by design, and the central log at ~/.local/state mixes
 every repository together. But the question "why has this project not been
 committed for two days?" is asked while standing *in* that project, so the
 answer belongs there too: `.suwgit.log` in the repository root, newest last,
@@ -28,7 +28,7 @@ MAX_ENTRIES = 10
 HEADER = (
     f"# {LOG_NAME} — why suwgit did not commit this repository. Newest last, "
     f"at most {MAX_ENTRIES} entries.\n"
-    "# Written by the suwgit daemon; safe to delete, it will come back if the problem does.\n"
+    "# Written by suwgit's scheduled sweep; safe to delete, it will come back if the problem does.\n"
 )
 # "2026-09-11 08:25:12  LLM unavailable: …" with an optional "  (×3)" repeat count.
 ENTRY_RE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\s\s(.*?)(?:\s\s\(×(\d+)\))?$")
@@ -67,6 +67,7 @@ def is_ignored(root: Path) -> bool:
         done = subprocess.run(
             ["git", "-C", str(root), "check-ignore", "-q", LOG_NAME],
             capture_output=True,
+            creationflags=subprocess.CREATE_NO_WINDOW,
             check=False,
         )
     except OSError:
@@ -85,17 +86,21 @@ def ignore_entry(root: Path) -> bool:
 
     gitignore = root / ".gitignore"
     try:
-        lines = gitignore.read_text(encoding="utf-8").splitlines()
+        body = gitignore.read_bytes()
     except OSError:
-        lines = []
+        body = b""
 
-    if any(line.strip().lstrip("/") == LOG_NAME for line in lines):
+    entry = LOG_NAME.encode("utf-8")
+    if any(line.strip().lstrip(b"/") == entry for line in body.splitlines()):
         return False
 
-    body = "\n".join(lines)
-    if body and not body.endswith("\n"):
-        body += "\n"
-    gitignore.write_text(f"{body}{LOG_NAME}\n", encoding="utf-8")
+    # Appended as bytes, in the line ending the file already uses — CRLF in a
+    # core.autocrlf checkout, LF otherwise. A text-mode rewrite on Windows would
+    # turn every line into CRLF and show the whole file as changed.
+    eol = b"\r\n" if b"\r\n" in body else b"\n"
+    prefix = eol if body and not body.endswith(b"\n") else b""
+    with gitignore.open("ab") as handle:
+        handle.write(prefix + entry + eol)
     return True
 
 

@@ -1,20 +1,16 @@
 """Reading and writing the suwgit config.
 
 One flat file holds both the settings collected by `suwgit init` and the list
-of registered repositories, so there is a single thing to back up or edit.
+of registered repositories, so there is a single thing to back up or edit:
+~/.config/suwgit/config.json.
 
-It is always READ from ~/.config/suwgit/config.json. In dotfiles mode that path
-is a stow symlink into ~/.dotfiles, so writes follow the symlink and land in the
-dotfiles repo — `register` keeps working without a second `stow`.
-
-The API key is the one thing that never goes in there: the config may be a
-tracked file in a git repo, so the key lives beside the logs in ~/.local/state.
+The API key is the one thing that never goes in there: the config may end up in
+a dotfiles repo, so the key lives beside the logs in ~/.local/state.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -47,7 +43,8 @@ class LlmConfig:
 class Config:
     llm: LlmConfig = field(default_factory=LlmConfig)
     interval_hours: float = DEFAULT_INTERVAL_HOURS
-    open_on_system_start: bool = True
+    # Whether the Task Scheduler entry runs sweeps. Off keeps it registered, disabled.
+    scheduled: bool = True
     # Push the branch after committing. Off by default: committing for you is
     # one thing, publishing on your behalf is another.
     push: bool = False
@@ -79,36 +76,22 @@ def read_api_key() -> str:
 
 
 def write_api_key(api_key: str) -> None:
+    """No chmod 600: Windows ignores it, and a folder in the profile is already
+    readable only by its owner (and administrators)."""
     paths.STATE_DIR.mkdir(parents=True, exist_ok=True)
     if not api_key:
         paths.API_KEY_FILE.unlink(missing_ok=True)
         return
     paths.API_KEY_FILE.write_text(api_key + "\n", encoding="utf-8")
-    os.chmod(paths.API_KEY_FILE, 0o600)
-
-
-def source_file() -> Path:
-    """The config file in force: the stowed one, or the dotfiles copy if stow has not run yet."""
-    if paths.CONFIG_FILE.exists():
-        return paths.CONFIG_FILE
-    if paths.DOTFILES_CONFIG_FILE.exists():
-        return paths.DOTFILES_CONFIG_FILE
-    return paths.CONFIG_FILE
-
-
-def write_target() -> Path:
-    """Where a save actually writes — through the stow symlink when there is one."""
-    current = source_file()
-    return current.resolve() if current.is_symlink() else current
 
 
 def load() -> Config:
     """Read the config, falling back to defaults for anything not written yet."""
-    current = source_file()
+    current = paths.CONFIG_FILE
     try:
         raw = json.loads(current.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        raise ConfigError(f"no config at {current} — run `suwgit init` first") from None
+        raise ConfigError(f"no config at {current} — run `just install` first") from None
     except (OSError, json.JSONDecodeError) as exc:
         raise ConfigError(f"cannot read {current}: {exc}") from None
 
@@ -121,7 +104,7 @@ def load() -> Config:
             timeout_seconds=int(llm_raw.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)),
         ),
         interval_hours=float(raw.get("interval_hours", DEFAULT_INTERVAL_HOURS)),
-        open_on_system_start=bool(raw.get("open_on_system_start", True)),
+        scheduled=bool(raw.get("scheduled", True)),
         push=bool(raw.get("push", False)),
         max_diff_chars=int(raw.get("max_diff_chars", DEFAULT_MAX_DIFF_CHARS)),
         repos=[str(p) for p in raw.get("repos", [])],
@@ -138,7 +121,7 @@ def load_or_default() -> Config:
 
 def save(config: Config, path: Path | None = None) -> Path:
     """Write the config atomically, keeping the API key out of the file."""
-    target = path or write_target()
+    target = path or paths.CONFIG_FILE
     target.parent.mkdir(parents=True, exist_ok=True)
 
     document = asdict(config)

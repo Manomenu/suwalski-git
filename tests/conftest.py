@@ -17,12 +17,11 @@ def sandbox(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "LOG_FILE", tmp_path / "state" / "suwgit" / "suwgit.log")
     monkeypatch.setattr(paths, "LOCK_DIR", tmp_path / "state" / "suwgit" / "locks")
     monkeypatch.setattr(paths, "API_KEY_FILE", tmp_path / "state" / "suwgit" / "api_key")
-    monkeypatch.setattr(paths, "DOTFILES_DIR", tmp_path / "dotfiles")
-    monkeypatch.setattr(paths, "DOTFILES_CONFIG_FILE", tmp_path / "dotfiles" / "fedora" / ".config" / "suwgit" / "config.json")
     monkeypatch.setattr(paths, "BIN_DIR", tmp_path / "bin")
-    monkeypatch.setattr(paths, "BIN_LINK", tmp_path / "bin" / "suwgit")
-    monkeypatch.setattr(paths, "SYSTEMD_USER_DIR", tmp_path / "systemd")
-    monkeypatch.setattr(paths, "SERVICE_FILE", tmp_path / "systemd" / "suwgit.service")
+    monkeypatch.setattr(paths, "BASH_SHIM", tmp_path / "bin" / "suwgit")
+    monkeypatch.setattr(paths, "CMD_SHIM", tmp_path / "bin" / "suwgit.cmd")
+    # Never the real Task Scheduler from a test.
+    monkeypatch.setattr(paths, "TASK_NAME", "suwgit-test-never-registered")
     # The logger caches its handler; without this it stays bound to an earlier
     # test's sandbox and writes there instead.
     monkeypatch.setattr(logs, "_logger", None)

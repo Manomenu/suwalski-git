@@ -1,8 +1,12 @@
-# suwgit
+# suwgit for Windows
 
 **Your working tree, committed for you, under a name a local LLM wrote.**
 
-Register a repository and forget about it. Every 1.5 hours a background daemon
+A Windows port of [suwalski-git](https://github.com/Manomenu/suwalski-git):
+the same tool, run by the **Task Scheduler** instead of systemd, used from
+**Git Bash**, cmd or PowerShell alike.
+
+Register a repository and forget about it. Every 1.5 hours a scheduled sweep
 looks at whatever you have left uncommitted, and — as long as you have stopped
 touching it — asks your own vLLM server what happened, and commits it:
 
@@ -16,12 +20,14 @@ No API keys to a cloud provider, no code leaving your network — it talks to a
 vLLM server you run. Pushing is opt-in: leave it off and the commits sit in your
 local history until you decide what to do with them.
 
-Or skip the waiting and commit right now, from anywhere inside the repository:
+Or skip the waiting and commit right now, from anywhere inside the repository —
+with a ticket id in front, if you work against a tracker:
 
 ```console
-$ suwgit commit .
-✓ /home/you/projects/dashboard  99f8156
-  [feature,refactor,bugfix] added csv export for revenue chart and removed broken tabs module
+$ suwgit push -p EH-3311111
+✓ C:\Users\you\projects\dashboard  99f8156
+  EH-3311111 [feature] added csv export for revenue chart
+  pushed master
 ```
 
 ## Why
@@ -31,47 +37,74 @@ be bisected, and "wip" tells you nothing six weeks later. suwgit turns the pile
 of changes you have not gotten around to committing into a readable history,
 without asking you to stop what you are doing.
 
+## Why not WSL
+
+It would work, but clumsily: git on `/mnt/c` goes through WSL's file bridge and
+is slow on a big repository; WSL's git has its own config, credentials and line
+ending settings beside the Windows ones; and a cron job inside WSL only runs
+while the WSL VM happens to be up. Native Windows Python, Git for Windows and the
+Task Scheduler need none of that.
+
 ## Requirements
 
-- Linux with systemd (the daemon runs as a **user** service)
-- Python 3.12+ — **no dependencies**, standard library only
-- git
+- Windows 10/11 with [Git for Windows](https://gitforwindows.org/) (Git Bash)
+- Python 3.12+ — **no dependencies**, standard library only (the Microsoft Store
+  build is fine)
+- [`just`](https://github.com/casey/just) — every setup step is a recipe
 - A [vLLM](https://github.com/vllm-project/vllm) server, or anything else that
   speaks the OpenAI `/chat/completions` dialect
+- For development only: [`uv`](https://docs.astral.sh/uv/), and `shellcheck` for the full gate
 
 ## Install
 
 ```bash
-git clone https://github.com/Manomenu/suwalski-git ~/repos/suwalski-git
-cd ~/repos/suwalski-git
-./bin/suwgit init
+git clone <this repo> ~/Repos/suwalski-git-win
+cd ~/Repos/suwalski-git-win
+just install
 ```
 
-`init` asks where to keep the config, for your server's URL and model, how often
-to sweep, and whether to start with your session. It then symlinks
-`~/.local/bin/suwgit` and installs a systemd user unit. Open a new terminal so
-the command is on your `PATH`, then:
+`just install` asks for your server's URL and model, how often to sweep, whether
+the schedule is on and whether to push. It then writes two launchers into
+`~/.local/bin` (`suwgit` for Git Bash, `suwgit.cmd` for cmd and PowerShell) and
+registers a Task Scheduler entry named `suwgit`. Open a new terminal, then:
 
 ```bash
 suwgit register ~/projects/dashboard
 suwgit list
 ```
 
-`init` is re-runnable — every prompt offers your current setting as its default.
+`just install` is re-runnable — every prompt offers your current setting as its
+default, and the task is replaced, not duplicated. Re-run it after changing the
+interval, or after reinstalling Python: the launchers and the task carry the
+path of the interpreter that ran the install.
+
+## just recipes
+
+| recipe | what it does |
+|---|---|
+| `just install` | interactive setup: config, launchers on PATH, scheduled task |
+| `just uninstall [--purge]` | remove the launchers, the task and the logs; **keeps your config** unless `--purge` |
+| `just task` | everything Windows knows about the task: state, last result, next run |
+| `just task-run` | start a sweep through the scheduler now — the real, windowless path |
+| `just check` | the quality gate: ruff, pytest, shellcheck, lockfile |
+| `just fmt` / `just sync` | ruff autofix and format / dev dependencies |
 
 ## Commands
 
 | command | what it does |
 |---|---|
-| `suwgit init` | interactive setup; safe to run again |
 | `suwgit register <folder>` | watch a repository (it must have a git remote) |
 | `suwgit unregister <folder>` | stop watching it |
-| `suwgit list` | config, service state, and which repositories are dirty |
-| `suwgit commit [path]` | commit the closest repository above `path` now, and print the message (`--push` / `--no-push` override the config for one run) |
-| `suwgit push [path]` | the same thing with the push forced on |
-| `suwgit logs [-n N] [-f]` | the daemon log, through [`bat`](https://github.com/sharkdp/bat) if you have it |
-| `suwgit daemon [--once]` | the loop systemd runs |
-| `suwgit uninstall [--purge]` | remove it from `PATH`, systemd and its logs; **keeps your config** unless `--purge` |
+| `suwgit list` | config, task state, and which repositories are dirty |
+| `suwgit commit [path] [-p PREFIX]` | commit the closest repository above `path` now, and print the message (`--push` / `--no-push` override the config for one run) |
+| `suwgit push [path] [-p PREFIX]` | the same thing with the push forced on |
+| `suwgit logs [-n N] [-f]` | the sweep log, through [`bat`](https://github.com/sharkdp/bat) if you have it |
+| `suwgit sweep` | one pass over every registered repository — what the scheduled task runs |
+| `suwgit init` / `suwgit uninstall` | what `just install` / `just uninstall` call |
+
+`-p` / `--prefix` puts its argument in front of the model's message, as given:
+`suwgit push -p EH-3311111` commits `EH-3311111 [feature] example`. The model
+never sees the prefix, so it cannot mangle it. Scheduled sweeps add none.
 
 ## Good messages, not chatter
 
@@ -97,7 +130,7 @@ WARNING  ~/projects/api: REFUSED to commit — possible secret in the changes
          (secrets/prod.env contains a real OpenAI API key in the added lines)
 ```
 
-A secret in a git history is not undone by a later commit, and the daemon
+A secret in a git history is not undone by a later commit, and a sweep
 commits while you are not watching, so this is the one moment anything can stop
 it. Placeholders, `.env.example` files and variables merely *named* `api_key`
 are left alone.
@@ -118,7 +151,7 @@ so it will not catch everything. Keep your `.gitignore` honest.
     "timeout_seconds": 180
   },
   "interval_hours": 1.5,
-  "open_on_system_start": true,
+  "scheduled": true,
   "push": false,
   "max_diff_chars": 400000,
   "repos": []
@@ -130,7 +163,8 @@ so it will not catch everything. Keep your `.gitignore` honest.
 | `base_url` | your server's address, written exactly as it works — suwgit uses it as given and adds nothing, so if it needs `/v1` on the end, put it there |
 | `model` | the model name your server reports |
 | `api_key` | can stay empty for a local server that does not check one |
-| `interval_hours` | how often to look; hours only |
+| `interval_hours` | how often to look; hours only, rounded to whole minutes — re-run `just install` after changing it |
+| `scheduled` | whether the task runs at all; off keeps it registered but disabled |
 | `push` | push after each commit, sweeps included; off by default |
 | `max_diff_chars` | how much of the diff the model reads |
 
@@ -139,24 +173,32 @@ if your model has a small context window, or if you would rather it read less
 and answer faster. When a diff is too big it gets trimmed, but the list of
 changed files is always sent, so the message still covers everything that moved.
 
-If you keep your dotfiles in a [GNU Stow](https://www.gnu.org/software/stow/)
-tree, `init` can put the config there instead of `~/.config`, and registering a
-repository updates the tracked file directly.
-
 ## Where things live
 
 | what | where |
 |---|---|
-| config | `~/.config/suwgit/config.json`, or a stow symlink into your dotfiles |
-| API key | `~/.local/state/suwgit/api_key`, chmod 600 — **never** in the config file, which may be tracked by git |
+| config | `~/.config/suwgit/config.json` (that is `%USERPROFILE%\.config\suwgit`) |
+| API key | `~/.local/state/suwgit/api_key` — **never** in the config file |
 | log | `~/.local/state/suwgit/suwgit.log`, one file, hard-capped at 5 MB |
 | locks | `~/.local/state/suwgit/locks/` |
 | blocker notes | `.suwgit.log` in the repository itself — see below |
-| unit | `~/.config/systemd/user/suwgit.service` |
+| launchers | `~/.local/bin/suwgit`, `~/.local/bin/suwgit.cmd` |
+| schedule | Task Scheduler → Task Scheduler Library → `suwgit` |
+
+Deliberately not `%APPDATA%`: the Microsoft Store build of Python redirects
+writes there into its own package folder, so the config you open in an editor
+would not be the one suwgit reads.
+
+The task runs as you, only while you are logged in (no stored password), under
+`pythonw.exe`, with every git call windowless — a sweep never flashes a console.
+A sweep missed while the machine was asleep runs as soon as it wakes. Git hooks
+in your repositories run as usual; a tool they need must be on the **Windows**
+user PATH, not only in `~/.bashrc`, because a scheduled task never sees Git
+Bash's PATH.
 
 ## When it cannot commit
 
-A daemon that fails silently is a daemon you stop trusting. So when something
+A background job that fails silently is one you stop trusting. So when something
 really blocks a repository — the model is unreachable, a suspected secret is in
 the changes, the push is rejected — suwgit leaves a note **in that repository**,
 as `.suwgit.log`:
@@ -186,17 +228,17 @@ time to finish editing.
 
 - **It does not push unless you say so.** `push` is `false` by default:
   committing for you is one thing, publishing on your behalf is another. With it
-  on, the current branch is pushed after every commit — daemon sweeps included —
-  and a branch with no upstream gets one, so a commit the daemon made on a new
+  on, the current branch is pushed after every commit — scheduled sweeps included —
+  and a branch with no upstream gets one, so a commit a sweep made on a new
   branch does not sit there invisibly. A sweep also pushes a repository that has
   **nothing to commit but something unpushed**, so commits you made by hand, and
   ones whose push failed earlier, still go out.
 - **It never forces, and never pulls.** If the remote has moved on, the push is
   rejected and that is where it stops: no `--force`, no automatic pull or
-  rebase, because a rebase conflict in an unattended daemon is how work gets
+  rebase, because a rebase conflict in an unattended sweep is how work gets
   lost. The commit is safe locally and goes out with the next sweep, once you
   have sorted the divergence yourself.
-- **It stays quiet.** The daemon never writes to a terminal. An unreachable
+- **It stays quiet.** A scheduled sweep never writes to a terminal. An unreachable
   server is a `WARNING` in the log and nothing else; your changes are left
   uncommitted and picked up on the next sweep.
 - **It does not retry.** A failed sweep is not worth hammering a busy GPU for —
@@ -209,8 +251,8 @@ time to finish editing.
   plus whatever you added. `suwgit commit` by hand ignores this entirely —
   asking for a commit is the statement that you are finished.
 - **It never commits into a mess.** A repository in the middle of a merge,
-  rebase, cherry-pick or bisect is left alone until you have finished. The
-  daemon and a manual `suwgit commit` can never collide over the same
+  rebase, cherry-pick or bisect is left alone until you have finished. A
+  scheduled sweep and a manual `suwgit commit` can never collide over the same
   repository.
 
 ## License

@@ -1,19 +1,22 @@
-"""The daemon's only output channel.
+"""The only output channel of a scheduled sweep.
 
 Nothing running in the background may write to a terminal — an unreachable
 vLLM server must be a log line, not a notification — so every code path that
-the daemon touches reports through here.
+a scheduled sweep touches reports through here.
 """
 
 from __future__ import annotations
 
-import fcntl
 import logging
 import os
+import shutil
 import subprocess
 import sys
+import time
+from collections import deque
 
 from . import paths
+from .locking import file_lock
 
 # One capped file, no .1/.2/.3 siblings. When it fills up the oldest lines go.
 MAX_BYTES = 5_000_000
@@ -27,8 +30,8 @@ _logger: logging.Logger | None = None
 class CappedFileHandler(logging.Handler):
     """Append-only log with a hard size cap, safe for several processes.
 
-    The daemon and an interactive `suwgit commit` write to the same file at the
-    same time. `RotatingFileHandler` cannot survive that — one process renames
+    A scheduled sweep and an interactive `suwgit commit` write to the same file
+    at the same time. `RotatingFileHandler` cannot survive that — one process renames
     the file while the other still holds the old inode open, and those lines are
     lost at the next rotation. So this handler opens the file fresh for every
     record (a handful per sweep — the cost is irrelevant) and takes a lock
@@ -44,15 +47,11 @@ class CappedFileHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             line = self.format(record) + "\n"
-            with self.lock_file.open("w", encoding="utf-8") as guard:
-                fcntl.flock(guard, fcntl.LOCK_EX)
-                try:
-                    with self.filename.open("a", encoding="utf-8") as handle:
-                        handle.write(line)
-                    if self.filename.stat().st_size > self.max_bytes:
-                        self._trim()
-                finally:
-                    fcntl.flock(guard, fcntl.LOCK_UN)
+            with file_lock(self.lock_file, wait=True):
+                with self.filename.open("a", encoding="utf-8") as handle:
+                    handle.write(line)
+                if self.filename.stat().st_size > self.max_bytes:
+                    self._trim()
         except OSError:
             self.handleError(record)
 
@@ -89,31 +88,49 @@ def logger() -> logging.Logger:
     return log
 
 
+def _last_lines(count: int) -> str:
+    with paths.LOG_FILE.open(encoding="utf-8", errors="replace") as handle:
+        return "".join(deque(handle, maxlen=count))
+
+
+def _follow() -> int:
+    """`tail -f` in Python: cmd and PowerShell have no tail, and Git Bash's
+    cannot be relied on to notice the in-place trim."""
+    position = paths.LOG_FILE.stat().st_size
+    try:
+        while True:
+            size = paths.LOG_FILE.stat().st_size
+            if size < position:  # trimmed under us — start again from the top
+                position = 0
+            if size > position:
+                with paths.LOG_FILE.open("rb") as handle:
+                    handle.seek(position)
+                    sys.stdout.write(handle.read().decode("utf-8", errors="replace"))
+                    position = handle.tell()
+                sys.stdout.flush()
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        return 0
+
+
 def show(lines: int, follow: bool) -> int:
     """`suwgit logs` — the log through bat when it is installed, plain otherwise."""
     if not paths.LOG_FILE.exists():
         print(f"no log yet at {paths.LOG_FILE}")
         return 0
 
-    if follow:
-        return subprocess.call(["tail", "-n", str(lines), "-f", str(paths.LOG_FILE)])
+    tail = _last_lines(lines)
+    bat = shutil.which("bat")
+    if bat and sys.stdout.isatty() and not follow:
+        done = subprocess.run(
+            [bat, "--language", "log", "--style", "plain", "--paging", "never", "--file-name", str(paths.LOG_FILE)],
+            input=tail,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        return done.returncode
 
-    tail = subprocess.run(["tail", "-n", str(lines), str(paths.LOG_FILE)], capture_output=True, text=True, check=False)
-    if tail.returncode != 0:
-        sys.stderr.write(tail.stderr)
-        return tail.returncode
-
-    if sys.stdout.isatty():
-        try:
-            bat = subprocess.run(
-                ["bat", "--language", "log", "--style", "plain", "--paging", "never", "--file-name", str(paths.LOG_FILE)],
-                input=tail.stdout,
-                text=True,
-                check=False,
-            )
-            return bat.returncode
-        except FileNotFoundError:
-            pass
-
-    sys.stdout.write(tail.stdout)
-    return 0
+    sys.stdout.write(tail)
+    sys.stdout.flush()
+    return _follow() if follow else 0

@@ -12,19 +12,16 @@ def _installed(sandbox):
     paths.API_KEY_FILE.write_text("secret\n")
     paths.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     paths.CONFIG_FILE.write_text('{"repos": []}')
-    paths.DOTFILES_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    paths.DOTFILES_CONFIG_FILE.write_text('{"repos": []}')
 
 
 def test_the_config_survives_a_plain_uninstall(sandbox, monkeypatch):
     _installed(sandbox)
-    monkeypatch.setattr(uninstall.install, "uninstall_service", list)
+    monkeypatch.setattr(uninstall.install, "uninstall_task", list)
     monkeypatch.setattr(uninstall.install, "unlink_from_path", list)
 
     assert uninstall.run(assume_yes=True) == 0
 
     assert paths.CONFIG_FILE.exists()
-    assert paths.DOTFILES_CONFIG_FILE.exists()
     assert paths.API_KEY_FILE.exists()
     assert not paths.LOG_FILE.exists()
     assert not paths.LOCK_DIR.exists()
@@ -32,13 +29,12 @@ def test_the_config_survives_a_plain_uninstall(sandbox, monkeypatch):
 
 def test_purge_takes_the_config_and_the_key_too(sandbox, monkeypatch):
     _installed(sandbox)
-    monkeypatch.setattr(uninstall.install, "uninstall_service", list)
+    monkeypatch.setattr(uninstall.install, "uninstall_task", list)
     monkeypatch.setattr(uninstall.install, "unlink_from_path", list)
 
     assert uninstall.run(purge=True, assume_yes=True) == 0
 
     assert not paths.CONFIG_FILE.exists()
-    assert not paths.DOTFILES_CONFIG_FILE.exists()
     assert not paths.API_KEY_FILE.exists()
     assert not paths.STATE_DIR.exists()
 
@@ -63,7 +59,7 @@ def test_anything_other_than_yes_aborts(sandbox, monkeypatch):
 def test_y_proceeds(sandbox, monkeypatch):
     _installed(sandbox)
     monkeypatch.setattr("builtins.input", lambda _prompt: "y")
-    monkeypatch.setattr(uninstall.install, "uninstall_service", list)
+    monkeypatch.setattr(uninstall.install, "uninstall_task", list)
     monkeypatch.setattr(uninstall.install, "unlink_from_path", list)
 
     assert uninstall.run() == 0
@@ -77,16 +73,3 @@ def test_a_clean_machine_is_a_no_op(sandbox, monkeypatch):
         raise AssertionError("must not ask when there is nothing to remove")
 
     assert uninstall.run() == 0
-
-
-def test_a_real_file_on_the_path_is_never_deleted(sandbox, monkeypatch):
-    """Only our own symlink goes; a binary someone else put there stays."""
-    from suwgit import install
-
-    paths.BIN_DIR.mkdir(parents=True, exist_ok=True)
-    paths.BIN_LINK.write_text("#!/bin/sh\necho not ours\n")
-
-    result = install.unlink_from_path()
-
-    assert paths.BIN_LINK.exists()
-    assert "left" in result[0]

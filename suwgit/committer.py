@@ -30,7 +30,7 @@ class Result:
     deferred: bool = False  # left alone because the files are still being edited
 
 
-def commit_repo(config: Config, root: Path, push: bool | None = None, quiet_seconds: float = 0.0) -> Result:
+def commit_repo(config: Config, root: Path, push: bool | None = None, quiet_seconds: float = 0.0, prefix: str = "") -> Result:
     """Commit everything in `root` under an LLM-written message, then push it.
 
     A clean tree is not the end of the story: commits you made by hand, or ones
@@ -54,6 +54,9 @@ def commit_repo(config: Config, root: Path, push: bool | None = None, quiet_seco
     suwgit committed, or you committed by hand.
 
     `push` overrides the config for this one call; None means follow the config.
+    `prefix` goes in front of the model's message as given — a ticket id such as
+    `EH-3311111` — so the history links to the tracker without asking the model
+    to copy a string it might mangle.
     A failed push never undoes the commit: the work is safe locally either way,
     and the next sweep pushes it along with whatever comes next.
     """
@@ -91,7 +94,7 @@ def commit_repo(config: Config, root: Path, push: bool | None = None, quiet_seco
                     repolog.record_blocker(root, f"refused to commit — possible secret in the changes: {reason}")
                     return Result(root, False, f"possible secret in the changes: {reason}", unsafe=True)
 
-                message = suggestion.message
+                message = f"{prefix} {suggestion.message}" if prefix else suggestion.message
                 commit = gitops.commit_all(root, message)
                 log.info("%s: committed %s %s", root, commit, message)
                 repolog.clear(root)

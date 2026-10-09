@@ -1,0 +1,6 @@
+# Line endings: LF in the repo and in every checkout, whatever core.autocrlf says (matches
+# .editorconfig). bin/suwgit is a bash script and must never get a CR.
+* text=auto eol=lf
+
+# Generated: collapsed in GitHub diffs and left out of language stats.
+uv.lock linguist-generated=true

@@ -47,7 +47,18 @@ def _git(root: Path | None, *args: str) -> str:
         cmd += ["-C", str(root)]
     cmd += list(args)
     try:
-        done = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        done = subprocess.run(
+            cmd,
+            capture_output=True,
+            # Not the ANSI code page Windows would pick: diffs and paths are UTF-8,
+            # and cp1252 both garbles Polish letters and chokes on some bytes.
+            encoding="utf-8",
+            errors="replace",
+            # The scheduled sweep runs under pythonw with no console; without this
+            # every git call (and every hook it runs) flashes a window on screen.
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            check=False,
+        )
     except OSError as exc:
         raise GitError(f"cannot run git: {exc}") from None
     if done.returncode != 0:

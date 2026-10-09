@@ -64,7 +64,7 @@ wheels = [
 ]
 
 [[package]]
-name = "suwalski-git"
+name = "suwalski-git-win"
 version = "0.1.0"
 source = { editable = "." }
 

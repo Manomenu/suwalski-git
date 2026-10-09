@@ -224,3 +224,20 @@ def test_a_rule_from_git_info_exclude_counts_as_ignored(tmp_path):
     assert repolog.is_ignored(repo)
     assert repolog.ignore_entry(repo) is False
     assert not (repo / ".gitignore").exists()
+
+
+def test_a_crlf_gitignore_gets_a_crlf_line_and_nothing_else_changes(tmp_path):
+    """A core.autocrlf checkout: a text-mode write would turn every line into a diff."""
+    repo = _repo(tmp_path / "repo")
+    (repo / ".gitignore").write_bytes(b"node_modules/\r\n.env\r\n")
+
+    assert repolog.ignore_entry(repo) is True
+    assert (repo / ".gitignore").read_bytes() == b"node_modules/\r\n.env\r\n.suwgit.log\r\n"
+
+
+def test_an_lf_gitignore_stays_lf(tmp_path):
+    repo = _repo(tmp_path / "repo")
+    (repo / ".gitignore").write_bytes(b"node_modules/")
+
+    assert repolog.ignore_entry(repo) is True
+    assert (repo / ".gitignore").read_bytes() == b"node_modules/\n.suwgit.log\n"
