@@ -31,7 +31,9 @@ Both halves of the format live in this one module, so they cannot drift apart.
 
 from __future__ import annotations
 
+import hashlib
 import re
+import secrets
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -43,13 +45,17 @@ WORK_SCOPE = "Work-Scope"
 PROJECT = "Project"
 TENANT = "Tenant"
 WORK_PERIOD = "Work-Period"
+WORK_ID = "Work-Id"
 
 # The last touch of a file is not the end of the work on it: it was saved, and
 # then looked at. Two minutes is a modest allowance, never stretched past now.
 END_ALLOWANCE_SECONDS = 120
 
 SUMMARY_RE = re.compile(rf"^{SUMMARY}:[ \t]*(.+)$", re.MULTILINE)
-TRAILER_RE = re.compile(rf"^({PROJECT}|{TENANT}|{WORK_PERIOD}):[ \t]*(.*)$", re.MULTILINE)
+TRAILER_RE = re.compile(rf"^({PROJECT}|{TENANT}|{WORK_PERIOD}|{WORK_ID}):[ \t]*(.*)$", re.MULTILINE)
+# What `git cherry-pick -x` adds to a copy: the same work, so it must not tell
+# the copy apart from the original.
+CHERRY_PICK_RE = re.compile(r"^\(cherry picked from commit [0-9a-f]+\)$", re.MULTILINE)
 
 
 @dataclass
@@ -66,6 +72,18 @@ class Entry:
     start: datetime
     end: datetime
     work_scope: list[str]
+    work_id: str = ""  # empty in a commit made before Work-Ids existed
+    reverted: date | None = None  # the day a revert undid it, if one did
+    message: str = ""  # as committed, without a cherry-pick note; for `key`
+
+    @property
+    def key(self) -> str:
+        """What makes two commits the same piece of work.
+
+        The Work-Id, which cherry-pick, rebase and amend carry over unchanged;
+        for an older commit without one, its message, which they carry too.
+        """
+        return self.work_id or "message:" + hashlib.sha1(self.message.encode("utf-8")).hexdigest()
 
 
 def _local(timestamp: float) -> datetime:
@@ -89,10 +107,25 @@ def format_period(start: datetime, end: datetime) -> str:
     return f"{start.isoformat(timespec='minutes')}/{end.isoformat(timespec='minutes')}"
 
 
-def compose(title: str, summary: str, work_scope: list[str], project: str, tenant: str, start: datetime, end: datetime) -> str:
-    """The full B2B commit message."""
+def new_work_id() -> str:
+    return secrets.token_hex(6)
+
+
+def compose(
+    title: str,
+    summary: str,
+    work_scope: list[str],
+    project: str,
+    tenant: str,
+    start: datetime,
+    end: datetime,
+    work_id: str = "",
+) -> str:
+    """The full B2B commit message. A `work_id` (see `new_work_id`) is added as a trailer."""
     scope = "\n".join(f"- {item}" for item in work_scope)
     trailers = f"{PROJECT}: {project}\n{TENANT}: {tenant}\n{WORK_PERIOD}: {format_period(start, end)}"
+    if work_id:
+        trailers += f"\n{WORK_ID}: {work_id}"
     return f"{title}\n\n{SUMMARY}: {summary}\n\n{WORK_SCOPE}:\n{scope}\n\n{trailers}"
 
 
@@ -137,38 +170,81 @@ def parse(message: str, repo: Path, commit: str, author: str = "") -> Entry | No
         start=period[0],
         end=period[1],
         work_scope=scope,
+        work_id=trailers.get(WORK_ID, ""),
+        message=CHERRY_PICK_RE.sub("", message).strip(),
     )
 
 
+def _undone(reverts: dict[str, tuple[date, str]], known: list[str]):
+    """Which commits a revert undid, and when, as a function of a full hash.
+
+    `reverts` maps a revert commit to (its day, the hash it names — as written,
+    possibly abbreviated). A revert that was itself reverted undoes nothing:
+    the work is back.
+    """
+    targets: dict[str, list[str]] = {}
+    for revert, (_, named) in reverts.items():
+        full = next((sha for sha in known if sha.startswith(named)), named)
+        targets.setdefault(full, []).append(revert)
+
+    memo: dict[str, date | None] = {}
+
+    def undone(sha: str, depth: int = 0) -> date | None:
+        if sha in memo:
+            return memo[sha]
+        days = [reverts[r][0] for r in targets.get(sha, []) if depth < 50 and undone(r, depth + 1) is None]
+        memo[sha] = min(days) if days else None
+        return memo[sha]
+
+    return undone
+
+
 def collect(repos: list[Path], tenant: str, first: date, last: date) -> list[Entry]:
-    """Every B2B commit of yours for `tenant` whose work started between `first` and `last`, inclusive.
+    """Every B2B piece of work of yours for `tenant` started between `first` and `last`, inclusive.
 
     Read straight from each repository's history. Only commits by the email git
     uses in that repository count — in a shared repository, a colleague's B2B
     commits are their record, not yours.
+
+    One piece of work can sit in several commits: cherry-picked to another
+    branch, rebased, amended, kept on a backup branch, or seen from two
+    worktrees. They count once (see `Entry.key`). A piece of work a revert
+    undid — any copy of it, by anyone — is marked `reverted`, not left out.
     """
-    entries = []
-    # Two worktrees of one repository, or a clone listed twice, share commits:
-    # `--all` in each finds the same ones, and each must count once.
+    # A commit is made after its work began, so nothing older than the first
+    # day can belong in the report. A day of slack covers commit dates written
+    # in another timezone; git reads a bare date as that date at the current
+    # time of day, hence the explicit midnight.
+    since = f"{(first - timedelta(days=1)).isoformat()} 00:00"
+
+    copies: dict[str, list[Entry]] = {}
+    reverts: dict[str, tuple[date, str]] = {}
     seen: set[str] = set()
     for root in repos:
         if not (root / ".git").exists():
             continue
         try:
-            # A commit is made after its work began, so nothing older than the
-            # first day can belong in the report. A day of slack covers commit
-            # dates written in another timezone; git reads a bare date as that
-            # date at the current time of day, hence the explicit midnight.
-            since = f"{(first - timedelta(days=1)).isoformat()} 00:00"
             commits = gitops.commit_messages(root, since=since, author=gitops.user_email(root))
+            marks = gitops.revert_marks(root, since=since)
         except gitops.GitError:
             continue
+        for revert, day, named in marks:
+            reverts.setdefault(revert, (day, named))
         for sha, author, message in commits:
             if sha in seen:
                 continue
             seen.add(sha)
             entry = parse(message, root, sha, author)
-            if entry and entry.tenant == tenant and first <= entry.start.astimezone().date() <= last:
-                entries.append(entry)
+            if entry and entry.tenant == tenant:
+                copies.setdefault(entry.key, []).append(entry)
+
+    undone = _undone(reverts, list(seen | set(reverts)))
+    entries = []
+    for group in copies.values():
+        entry = min(group, key=lambda e: e.start)
+        days = [day for copy in group if (day := undone(copy.commit))]
+        entry.reverted = min(days) if days else None
+        if first <= entry.start.astimezone().date() <= last:
+            entries.append(entry)
     entries.sort(key=lambda e: (e.project.lower(), e.start))
     return entries

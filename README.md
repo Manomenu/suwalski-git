@@ -56,11 +56,16 @@ and shows days only:
 | `--from 2026-09-13 --to 2026-10-13` | any range, both days included; dates as `YYYY-MM-DD` |
 | `--time` | add the hours of every piece of work |
 | `--no-summary` | leave out the project summaries: faster, and works without the AI server |
+| `--hide-reverted` | leave out work a later revert undid |
 | `-o ~/invoices/` | where to save it: a file or a folder (default: the current folder, as `lokum--<today>.pdf`) |
 | `--format json` | print the report as JSON instead, for scripts: `suwgit report --tenant lokum --format json \| jq` |
 
 The report lists only your own commits, from every repository where you did
-work for that client, on every branch.
+work for that client, on every branch. Each piece of work counts once, even
+when it was cherry-picked, rebased or kept on a backup branch. Work that a
+later revert undid stays in the report, marked **Reverted** with the day. Undo
+a change by hand and commit, and suwgit records it as a revert, not as new
+client work.
 
 ## Recording work for a client
 

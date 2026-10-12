@@ -241,7 +241,7 @@ def cmd_commit(args: argparse.Namespace) -> int:
             )
     print(f"{DIM}asking {config.llm.model or 'the model'} about {root}…{RESET}")
     result = commit_repo(config, root, push=push, prefix=args.prefix.strip(), tenant=tenant, project=project)
-    if tenant and result.committed:
+    if tenant and result.committed and not result.reverts:
         try:
             tenants.remember(root, tenant, project)
         except OSError:
@@ -264,6 +264,9 @@ def cmd_commit(args: argparse.Namespace) -> int:
             print(f"  {DIM}{line}{RESET}" if line else "")
     else:
         print(f"{GREEN}✓{RESET} {root}  {DIM}nothing to commit — {result.reason}{RESET}")
+    if result.reverts and tenant:
+        print(f"  {DIM}these changes exactly undo {result.reverts[:10]}: committed as its revert, not as B2B work —")
+        print(f"  the report marks that work as reverted{RESET}")
     if result.pushed:
         print(f"  {DIM}{result.pushed}{RESET}")
     if result.push_error:
@@ -306,7 +309,14 @@ def _project_summaries(entries: list[b2b.Entry], first: date, last: date) -> dic
     summaries = {}
     for name, items in report.by_project(entries).items():
         print(f"{DIM}summarising {name} with {llm_config.model or 'the model'}…{RESET}", file=sys.stderr)
-        work = [(f"{e.start.astimezone():%Y-%m-%d}", e.summary or e.title, e.work_scope) for e in items]
+        work = [
+            (
+                f"{e.start.astimezone():%Y-%m-%d}" + (f", reverted on {e.reverted} — this was undone" if e.reverted else ""),
+                e.summary or e.title,
+                e.work_scope,
+            )
+            for e in items
+        ]
         try:
             summaries[name] = summarize_project(llm_config, name, first.isoformat(), last.isoformat(), work)
         except LlmUnavailable as exc:
@@ -327,6 +337,8 @@ def cmd_report(args: argparse.Namespace) -> int:
         return _fail(f"no repository has ever had a B2B commit for {args.tenant} (index: {paths.TENANTS_FILE})")
 
     entries = b2b.collect(repos, args.tenant, first, last)
+    if args.hide_reverted:
+        entries = [e for e in entries if not e.reverted]
     summaries = {} if args.no_summary or not entries else _project_summaries(entries, first, last)
     if args.format == "json":
         # stdout carries the JSON and nothing else, so it pipes into jq; an empty
@@ -439,6 +451,10 @@ in a shared repository is left out. Nothing is stored: it is all read from git.
 The tenant itself is not printed in the PDF; the client sees project names.
 A commit counts when its work started within --from .. --to, both days included.
 
+Work that a later revert undid stays in, marked Reverted with the day; one
+piece of work committed several times (cherry-pick, rebase, a backup branch)
+counts once. --hide-reverted leaves undone work out.
+
 Each project opens with a short summary of the period, written by the LLM from
 the commits in the report. Without the server the report is still made, only
 without them; --no-summary skips them on purpose."""
@@ -527,6 +543,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report_cmd.add_argument("--to", metavar="DATE", type=_day, help="last day, inclusive, YYYY-MM-DD (default: today)")
     report_cmd.add_argument("--time", action="store_true", help="show the hours of every work period, not only the days")
+    report_cmd.add_argument(
+        "--hide-reverted",
+        action="store_true",
+        help="leave out work a later revert undid (shown, marked Reverted, by default)",
+    )
     report_cmd.add_argument(
         "--no-summary",
         action="store_true",

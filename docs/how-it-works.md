@@ -55,13 +55,22 @@ built, and where everything lives. For using it, see the [README](../README.md).
    was modified within the last three quarters of the interval, the sweep leaves
    the repository for the next one. `suwgit commit` passes no wait: asking for a
    commit is the statement that you are done.
-4. **Ask the model** for the message (below).
-5. **Refuse on a suspected secret.** Nothing is committed or pushed; the reason
+4. **Spot an exact undo.** If the changes are, byte for byte, the reverse of
+   one of the last 20 commits, they are that commit's revert. The tree they
+   would commit as is built in a scratch index, so the real index is left
+   alone. Such a commit is written as `git revert` writes it, `Revert "<title>"`
+   with `This reverts commit <hash>.`, and never as B2B work, even under
+   `--b2b`. The model is still asked, for the secret check below: an undo can
+   bring a secret back.
+5. **Ask the model** for the message (below). It sees the diff only, so a
+   partial undo by hand reads to it as new work; `git revert` is the way to
+   take part of a change back.
+6. **Refuse on a suspected secret.** Nothing is committed or pushed; the reason
    goes to the log and to `.suwgit.log`.
-6. **Commit** with `git add -A` and `git commit`, with the `--prefix` in front
+7. **Commit** with `git add -A` and `git commit`, with the `--prefix` in front
    of the title if one was given. For a B2B commit, record the repository in
    the tenant index.
-7. **Push** if pushing is on: the current branch, never forced, setting an
+8. **Push** if pushing is on: the current branch, never forced, setting an
    upstream when there is none. A clean repository with unpushed commits is
    pushed too, so commits made by hand, and ones whose push failed earlier, go
    out.
@@ -100,7 +109,11 @@ same diff took 952 completion tokens and ~18 s with thinking on, sometimes
 running out of budget and returning nothing, against 36 tokens and 0.8 s with it
 off, for the same answer.
 
-**Fallbacks.** A server that rejects the schema (HTTP 400/404/422/501) is asked
+**Fallbacks.** An answer that comes back unusable — cut off, JSON that does
+not parse, a B2B answer missing its summary or work scope — is asked for once
+more; a server that cannot be reached is not. An answer that began as JSON is
+never read as prose, so a broken one cannot end up committed as its own
+fragments. A server that rejects the schema (HTTP 400/404/422/501) is asked
 again without it. Prose that comes back anyway is searched for the
 `[categories] description` shape, with reasoning blocks and preambles stripped.
 That fallback carries no secret-check answer, and in B2B mode there is no
@@ -127,6 +140,7 @@ Work-Scope:
 Project: Lokum Shop
 Tenant: lokum
 Work-Period: 2026-10-12T09:14+02:00/2026-10-12T11:04+02:00
+Work-Id: 05bbe3447cb0
 ```
 
 - The **title** stays technical, for the developer and `git log`.
@@ -134,7 +148,12 @@ Work-Period: 2026-10-12T09:14+02:00/2026-10-12T11:04+02:00
   the reader as a business owner who knows the product, not its code, bans
   jargon, file names and identifiers, asks for concrete work rather than
   inflated benefits, and gives a good and a bad example.
-- **Project**, **Tenant** and **Work-Period** are git trailers, so
+- **Work-Id** is a random identity for the piece of work. Cherry-pick, rebase
+  and amend carry a message over unchanged, so every copy of the commit keeps
+  it, and a report counts the work once. A commit made before Work-Ids is
+  matched by its message instead, ignoring the `(cherry picked from …)` line
+  that `cherry-pick -x` adds.
+- **Project**, **Tenant**, **Work-Period** and **Work-Id** are git trailers, so
   `git log --format='%(trailers)'` reads them too.
 - **Work-Period** is an ISO 8601 interval with the UTC offset in it, so it
   means the same on any machine. It runs from the oldest modification time
@@ -177,8 +196,14 @@ under its defaults, and never asks.
    counts and colleagues' commits in a shared repository do not.
 3. Commits are parsed back with `b2b.parse`, filtered by tenant and by the day
    their work started (both ends of the range included), and grouped by
-   project. A commit is counted once even when two listed paths share it, as
-   two worktrees of one repository do.
+   project. One piece of work counts once, however many commits hold it:
+   copies are matched by Work-Id (above), which also covers two worktrees of
+   one repository listing the same commits.
+   Reverts are read from the same histories, by anyone, as the line
+   `This reverts commit <hash>`. Work any copy of which was undone is marked
+   with the revert's day, and stays in; a revert that was itself reverted
+   undoes nothing. `--hide-reverted` leaves undone work out, and the model
+   writing the project summary is told which entries were undone.
 4. Each project gets a summary from the model: one more request per project,
    with the day, Summary and Work-Scope of each of its entries — nothing else,
    no code, no diff. The prompt asks for 2–4 plain sentences on what the period

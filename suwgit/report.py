@@ -150,7 +150,7 @@ def _entry_rows(entry: Entry, width: float, with_time: bool) -> list[tuple[str, 
     for item in entry.work_scope:
         wrapped = wrap(item, REGULAR, BODY_SIZE, body - 12)
         scope += [f"•  {wrapped[0]}"] + [f"    {line}" for line in wrapped[1:]]
-    return [
+    rows = [
         ("Work period", [_period(entry, with_time)], BOLD),
         # The client-facing summary; the technical title only stands in for a
         # commit written before summaries existed.
@@ -158,6 +158,9 @@ def _entry_rows(entry: Entry, width: float, with_time: bool) -> list[tuple[str, 
         ("Work scope", scope, REGULAR),
         ("Commit", [f"{entry.commit[:10]}  ·  {entry.repo.name}"], REGULAR),
     ]
+    if entry.reverted:
+        rows.insert(3, ("Reverted", [f"{entry.reverted:%Y-%m-%d} — this work was undone later"], BOLD))
+    return rows
 
 
 def by_project(entries: list[Entry]) -> dict[str, list[Entry]]:
@@ -290,6 +293,8 @@ def as_json(
                         "summary": e.summary,
                         "title": e.title,
                         "work_scope": e.work_scope,
+                        "reverted": e.reverted.isoformat() if e.reverted else None,
+                        "work_id": e.work_id,
                         "commit": e.commit,
                         "repository": str(e.repo),
                         "author": e.author,
