@@ -1,9 +1,9 @@
 # How suwgit for Windows works
 
-The technical side of suwgit for Windows, a port of
-[suwalski-git](https://github.com/Manomenu/suwalski-git) that runs under the
-Task Scheduler instead of systemd. The commit logic is shared with the Linux
-version on purpose; only a thin platform layer differs. The technical side: how a commit gets made, what the model is asked
+The technical side of suwgit for Windows — the `master-windows` branch of
+[suwalski-git](https://github.com/Manomenu/suwalski-git), whose `master` is the
+Linux version. It runs under the Task Scheduler instead of systemd. The commit
+logic is shared with `master` on purpose; only a thin platform layer differs. The technical side: how a commit gets made, what the model is asked
 and how its answer is held in shape, the B2B commit format, how the report is
 built, and where everything lives. For using it, see the [README](../README.md).
 

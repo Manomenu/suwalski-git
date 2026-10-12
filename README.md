@@ -2,8 +2,8 @@
 
 **Your work, committed for you, and a report for your client.**
 
-A Windows port of [suwalski-git](https://github.com/Manomenu/suwalski-git): the
-same tool, run by the **Task Scheduler** instead of systemd, used from
+The Windows version of [suwalski-git](https://github.com/Manomenu/suwalski-git),
+on its `master-windows` branch: the same tool, run by the **Task Scheduler** instead of systemd, used from
 **Git Bash**, cmd or PowerShell alike.
 
 suwgit watches your git repositories and commits what you leave uncommitted,
@@ -140,8 +140,8 @@ speaks the OpenAI chat-completions API. There is nothing else to install.
 In Git Bash:
 
 ```bash
-git clone <this repo> ~/Repos/suwalski-git-win
-cd ~/Repos/suwalski-git-win
+git clone -b master-windows https://github.com/Manomenu/suwalski-git ~/Repos/suwalski-git
+cd ~/Repos/suwalski-git
 ./bin/suwgit init
 ```
 

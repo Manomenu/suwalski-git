@@ -3,10 +3,11 @@
 Rules for anyone — human or AI agent — changing this repository. `CLAUDE.md` only points
 here; this file is the one to edit.
 
-suwgit for Windows: a port of [suwalski-git](https://github.com/Manomenu/suwalski-git)
-(remote `upstream`) that runs under the Task Scheduler instead of systemd. The commit logic
-is shared with upstream on purpose — keep the platform layer thin, so upstream fixes still
-apply.
+suwgit for Windows: the `master-windows` branch of
+[suwalski-git](https://github.com/Manomenu/suwalski-git), whose `master` is the Linux
+version. It runs under the Task Scheduler instead of systemd. The commit logic is shared with
+`master` on purpose — keep the platform layer thin, so fixes on `master` still apply when it
+is merged into `master-windows`.
 
 ## Git: committing is the owner's job
 
@@ -27,9 +28,9 @@ many words, and it covers that task only.
 
 | Path | What |
 | --- | --- |
-| `suwgit/committer.py`, `gitops.py`, `llm.py`, `repolog.py`, `config.py` | the tool itself: what to commit, how to name it — mostly identical to upstream |
+| `suwgit/committer.py`, `gitops.py`, `llm.py`, `repolog.py`, `config.py` | the tool itself: what to commit, how to name it — mostly identical to `master` |
 | `suwgit/sweep.py` | one pass over the registry — what the scheduled task runs |
-| `suwgit/b2b.py`, `report.py`, `tenants.py` | B2B commits as a record of client work, and `suwgit report` — platform-independent, kept identical to upstream |
+| `suwgit/b2b.py`, `report.py`, `tenants.py` | B2B commits as a record of client work, and `suwgit report` — platform-independent, kept identical to `master` |
 | `suwgit/install.py`, `initcmd.py`, `uninstall.py` | launchers in `~/.local/bin` and the Task Scheduler entry |
 | `suwgit/locking.py`, `logs.py`, `paths.py` | the Windows platform layer: `msvcrt` locks, the capped log, file locations |
 | `bin/suwgit.py` | the entry point every launcher and the task run; `bin/suwgit` runs it from the clone |
