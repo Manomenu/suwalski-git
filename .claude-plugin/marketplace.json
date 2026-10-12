@@ -1,0 +1,14 @@
+{
+  "name": "suwalski-git",
+  "description": "suwgit for Claude Code: LLM-written commits, B2B client work records and work reports.",
+  "owner": {
+    "name": "Piotr Gugnowski"
+  },
+  "plugins": [
+    {
+      "name": "suwgit",
+      "source": "./claude-plugin",
+      "description": "Set up and drive suwgit from Claude Code: commits, client work records, work reports."
+    }
+  ]
+}

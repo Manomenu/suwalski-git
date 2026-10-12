@@ -304,6 +304,27 @@ dotfiles tree instead; writes then follow the stow symlink into the tracked file
 | blocker notes | `.suwgit.log` in the repository itself |
 | unit | `~/.config/systemd/user/suwgit.service`, with the installing shell's `PATH` baked in so git hooks find their tools |
 
+## The Claude Code plugin
+
+`claude-plugin/` is a Claude Code plugin, and `.claude-plugin/marketplace.json`
+in the repository root makes the repository its marketplace. It holds no code:
+
+- `skills/suwgit/SKILL.md` teaches Claude what suwgit is, how to set it up on
+  Linux and Windows (giving the user the `init` lines to run, since `init` is
+  interactive), how a request maps to commands, and the rules: commits only on
+  request, never around a refused commit, never a force-push.
+- `commands/{commit,push,list,report}.md` are `/suwgit:commit` and the others.
+  Each takes free text as `$ARGUMENTS`, and may run `suwgit` (and `jq` for
+  reports) without a permission prompt.
+
+Claude's shell has no terminal, so suwgit's `[Y/n]` question about the last
+`--b2b` values always answers no there. The skill and commands therefore have
+Claude pass the tenant and project explicitly, read from `suwgit list`, and add
+`-y` only after the user has confirmed them.
+
+`claude plugin validate .` checks the marketplace and the plugin. To try a
+change, start a session with `claude --plugin-dir ./claude-plugin`.
+
 ## Tests
 
 `./scripts/test-solution.sh` runs ruff (lint and format check) and pytest. Tests
