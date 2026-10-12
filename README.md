@@ -129,6 +129,10 @@ prefix.
 
 ## Install
 
+On Windows, use the
+[`master-windows`](https://github.com/Manomenu/suwalski-git/tree/master-windows)
+branch instead: the same tool, run by the Task Scheduler.
+
 You need Linux with systemd, Python 3.12+, git, and a
 [vLLM](https://github.com/vllm-project/vllm) server, or anything else that
 speaks the OpenAI chat-completions API. There is nothing else to install.
