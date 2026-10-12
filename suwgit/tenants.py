@@ -82,3 +82,22 @@ def remember(root: Path, tenant: str, project: str) -> None:
     document = _read(paths.LAST_B2B_FILE)
     document[str(root)] = {"tenant": tenant, "project": project}
     _write(paths.LAST_B2B_FILE, document)
+
+
+def last_mail(tenant: str) -> tuple[list[str], str] | None:
+    """(recipients, sender) of the last report mailed for `tenant`, if one was."""
+    last = _read(paths.LAST_MAIL_FILE).get(tenant)
+    if not isinstance(last, dict) or not last.get("recipients"):
+        return None
+    return [str(r) for r in last["recipients"]], str(last.get("sender", ""))
+
+
+def remember_mail(tenant: str, recipients: list[str], sender: str) -> None:
+    document = _read(paths.LAST_MAIL_FILE)
+    document[tenant] = {"recipients": recipients, "sender": sender}
+    _write(paths.LAST_MAIL_FILE, document)
+
+
+def last_mails() -> dict[str, tuple[list[str], str]]:
+    """Every tenant's last mailing, for `suwgit list`."""
+    return {tenant: found for tenant in _read(paths.LAST_MAIL_FILE) if (found := last_mail(tenant))}

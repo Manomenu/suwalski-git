@@ -28,9 +28,15 @@ $ARGUMENTS
      named. The sender is always their own mailbox from `suwgit init`.
    - Only after they say yes in this conversation, run the same command with
      `--mail <address>` (once per address, as written) and `-y`, and report who
-     it was sent to.
-   - If suwgit says e-mail is not set up, explain that `suwgit init` sets it up
-     (the user runs it; it asks for the SMTP password) and that they can send
-     the PDF by hand meanwhile. For JSON, or when the user asked
+     it was sent to and from which mailbox.
+   - "the same as last time": `suwgit list` shows, under `mailboxes`, where
+     each tenant's last report went and from which mailbox. Name those
+     addresses to the user before sending; then pass them as `--mail` too.
+   - Several mailboxes (`suwgit list` → `mailboxes`): pass `--mail-from
+     <address>`. If the user did not say which and this tenant's last report
+     shows none, ask. suwgit's arrow-key pick cannot be used from here.
+   - No mailbox: the user adds one with `suwgit add-mail <their address>` (they
+     run it: it asks for the SMTP password). Meanwhile they can send the PDF
+     by hand. For JSON, or when the user asked
    a question about the work rather than for a file, answer from the JSON
    (`jq` is fine for that) instead of pasting it whole.

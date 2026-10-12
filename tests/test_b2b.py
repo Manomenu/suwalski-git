@@ -553,7 +553,7 @@ def test_list_shows_every_tenant_with_its_folders_and_projects(sandbox, monkeypa
 
     assert main.main(["list"]) == 0
     out = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
-    plain = [line.strip() for line in out.split("tenants\n")[1].splitlines() if line.strip()]
+    plain = [line.strip() for line in out.split("tenants\n")[1].split("mailboxes\n")[0].splitlines() if line.strip()]
     assert plain == ["acme, shared (Acme CRM)", "lokum, api", "lokum, shared", "lokum, shop (Lokum Shop)"]
 
 

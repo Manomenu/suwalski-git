@@ -38,7 +38,7 @@ def config_targets() -> list[Path]:
         paths.CONFIG_FILE,
         paths.DOTFILES_CONFIG_FILE,
         paths.API_KEY_FILE,
-        paths.MAIL_PASSWORD_FILE,
+        paths.MAIL_PASSWORDS_FILE,
         paths.CONFIG_DIR,
         paths.STATE_DIR,
     )

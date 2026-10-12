@@ -67,13 +67,14 @@ def _ask_secret(prompt: str, existing: str) -> str:
 SECURITY_PORTS = {"starttls": 587, "ssl": 465, "none": 25}
 
 
-def _ask_mail(existing: config_module.MailConfig) -> config_module.MailConfig:
-    """The optional mailbox for `suwgit report --mail`. No means none, and forgets an earlier one."""
-    print(f"\n{BOLD}E-mail{RESET}  {DIM}optional: lets `suwgit report --mail <address>` send the PDF{RESET}")
-    if not _ask_yes_no("  Send reports by e-mail?", existing.is_configured):
-        return config_module.MailConfig()
+def ask_mailbox(existing: config_module.MailConfig) -> config_module.MailConfig:
+    """The questions for one mailbox; `existing` holds the defaults (blank for a new one).
 
-    host = _ask("  SMTP server (e.g. smtp.gmail.com)", existing.host)
+    Also what `suwgit add-mail` asks.
+    """
+    sender = _ask("  Address — reports are sent from it", existing.sender)
+    domain = sender.partition("@")[2]
+    host = _ask("  SMTP server (e.g. smtp.gmail.com)", existing.host or (f"smtp.{domain}" if domain else ""))
     while True:
         security = _ask("  Encryption — starttls, ssl or none", existing.security or "starttls").lower()
         if security in SECURITY_PORTS:
@@ -86,10 +87,21 @@ def _ask_mail(existing: config_module.MailConfig) -> config_module.MailConfig:
             break
         except ValueError:
             print(f"  {YELLOW}a number, like 587{RESET}")
-    username = _ask("  Login (usually the address; blank if the server needs none)", existing.username, allow_empty=True)
+    username = _ask("  Login (blank if the server needs none)", existing.username or sender, allow_empty=True)
     password = _ask_secret("  Password — Gmail and Outlook need an app password", existing.password) if username else ""
-    sender = _ask("  Send as (the From address)", existing.sender or (username if "@" in username else ""))
     return config_module.MailConfig(host=host, port=port, security=security, username=username, password=password, sender=sender)
+
+
+def _ask_mailboxes(existing: list[config_module.MailConfig]) -> list[config_module.MailConfig]:
+    """Optional: one more mailbox for `suwgit report --mail`. Enter leaves them as they are."""
+    print(f"\n{BOLD}E-mail{RESET}  {DIM}optional: lets `suwgit report --mail <address>` send the PDF{RESET}")
+    for box in existing:
+        print(f"  {GREEN}✓{RESET} {box.sender}  {DIM}{box.host}:{box.port}{RESET}")
+    if not _ask_yes_no("  Add a mailbox?", False):
+        return list(existing)
+    holder = config_module.Config(mailboxes=list(existing))
+    config_module.add_mailbox(holder, ask_mailbox(config_module.MailConfig()))
+    return holder.mailboxes
 
 
 def _ask_location() -> bool:
@@ -150,7 +162,7 @@ def run() -> int:
         existing.report_author or gitops.global_user_name(),
         allow_empty=True,
     )
-    mail = _ask_mail(existing.mail)
+    mailboxes = _ask_mailboxes(existing.mailboxes)
 
     config = Config(
         llm=config_module.LlmConfig(
@@ -164,17 +176,15 @@ def run() -> int:
         push=push,
         max_diff_chars=existing.max_diff_chars,
         report_author=report_author,
-        mail=mail,
+        mailboxes=mailboxes,
         repos=existing.repos,
     )
     _, detail = _place_config(config, use_dotfiles)
     print(f"\n{GREEN}✓{RESET} {detail}")
     if api_key:
         print(f"{GREEN}✓{RESET} API key kept out of the config, in {paths.API_KEY_FILE} (chmod 600)")
-    if mail.is_configured:
-        print(f"{GREEN}✓{RESET} reports can be sent from {mail.sender}  {DIM}(suwgit report --tenant <t> --mail <address>){RESET}")
-        if mail.password:
-            print(f"{GREEN}✓{RESET} mail password kept out of the config, in {paths.MAIL_PASSWORD_FILE} (chmod 600)")
+    if any(box.password for box in mailboxes):
+        print(f"{GREEN}✓{RESET} mail passwords kept out of the config, in {paths.MAIL_PASSWORDS_FILE} (chmod 600)")
 
     linked, detail = install.link_into_path()
     print(f"{GREEN}✓{RESET} {detail}" if linked else f"{YELLOW}!{RESET} {detail}")
@@ -193,5 +203,9 @@ def run() -> int:
         step += 1
     print(f"  {step}. {BOLD}Open a new terminal{RESET} so `suwgit` is picked up from PATH.")
     print(f"  {step + 1}. Register a repository:  suwgit register <folder>")
-    print(f"  {step + 2}. Watch it work:          suwgit logs -f\n")
+    print(f"  {step + 2}. Watch it work:          suwgit logs -f")
+    if mailboxes:
+        print(f"  {DIM}Another mailbox to send reports from:  suwgit add-mail <address>{RESET}\n")
+    else:
+        print(f"  {DIM}To send reports by e-mail later:       suwgit add-mail <address>{RESET}\n")
     return 0

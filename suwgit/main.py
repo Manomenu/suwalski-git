@@ -12,7 +12,7 @@ import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from . import b2b, daemon, gitops, initcmd, install, logs, mailer, paths, report, tenants, uninstall
+from . import b2b, daemon, gitops, initcmd, install, logs, mailer, paths, picker, report, tenants, uninstall
 from . import config as config_module
 from .committer import commit_repo
 from .llm import LlmUnavailable, summarize_project
@@ -121,6 +121,47 @@ def cmd_list(_args: argparse.Namespace) -> int:
         print(f"  {DIM}none yet — suwgit commit --b2b <tenant>, or suwgit register <folder> --default-b2b <tenant>{RESET}")
     for tenant, root, project in rows:
         print(f"  {tenant}, {root.name}" + (f" {DIM}({project}){RESET}" if project else ""))
+
+    print(f"\n{BOLD}mailboxes{RESET}")
+    if not config.mailboxes:
+        print(f"  {DIM}none — suwgit add-mail <address> to send reports by e-mail{RESET}")
+    for box in config.mailboxes:
+        print(f"  {box.sender}  {DIM}{box.host}:{box.port} {box.security}{RESET}")
+    for tenant, (recipients, sender) in sorted(tenants.last_mails().items()):
+        print(f"  {DIM}last report for {tenant} went to {', '.join(recipients)} from {sender}{RESET}")
+    return 0
+
+
+def cmd_add_mail(args: argparse.Namespace) -> int:
+    try:
+        config = config_module.load()
+    except config_module.ConfigError as exc:
+        return _fail(str(exc))
+    existing = config_module.mailbox(config, args.address) if args.address else None
+    print(f"{BOLD}{'Update' if existing else 'Add'} a mailbox{RESET}  {DIM}reports can be sent from it with --mail{RESET}")
+    try:
+        box = initcmd.ask_mailbox(existing or config_module.MailConfig(sender=args.address or ""))
+    except (KeyboardInterrupt, EOFError):
+        print("\naborted, nothing written")
+        return 1
+    status = config_module.add_mailbox(config, box)
+    config_module.save(config)
+    print(f"{GREEN}✓{RESET} {status} {BOLD}{box.sender}{RESET}  {DIM}{box.host}:{box.port} {box.security}{RESET}")
+    if box.password:
+        print(f"  {DIM}password kept out of the config, in {paths.MAIL_PASSWORDS_FILE}{RESET}")
+    return 0
+
+
+def cmd_remove_mail(args: argparse.Namespace) -> int:
+    try:
+        config = config_module.load()
+    except config_module.ConfigError as exc:
+        return _fail(str(exc))
+    if not config_module.remove_mailbox(config, args.address):
+        known = ", ".join(box.sender for box in config.mailboxes) or "none"
+        return _fail(f"no mailbox {args.address} (mailboxes: {known})")
+    config_module.save(config)
+    print(f"{GREEN}✓{RESET} removed {args.address}, and its password")
     return 0
 
 
@@ -326,6 +367,85 @@ def _project_summaries(entries: list[b2b.Entry], first: date, last: date) -> dic
     return summaries
 
 
+# What a bare `--mail` parses to: "the previous recipients for this tenant".
+PREVIOUS_RECIPIENTS = object()
+
+
+def _ask_line(prompt: str) -> str:
+    try:
+        return input(prompt).strip()
+    except EOFError:
+        print()
+        return ""
+
+
+def _recipients(args: argparse.Namespace) -> list[str]:
+    """The addresses to send to: those named, and with a bare --mail the tenant's previous ones.
+
+    The previous ones are offered with [Y/n] and their addresses shown; no lets
+    the user type others. ValueError says what is missing.
+    """
+    named = [address for address in args.mail if address is not PREVIOUS_RECIPIENTS]
+    if len(named) < len(args.mail):
+        last = tenants.last_mail(args.tenant)
+        if last is None:
+            raise ValueError(f"no report has been mailed for {args.tenant} yet — name the address: --mail <address>")
+        previous = ", ".join(last[0])
+        if args.yes:
+            print(f"{DIM}sending to the previous recipient(s) for {args.tenant}: {previous}{RESET}")
+            named = last[0] + named
+        elif _confirm(f"Send to the previous recipient(s) for {BOLD}{args.tenant}{RESET}: {BOLD}{previous}{RESET}?"):
+            named = last[0] + named
+        else:
+            typed = _ask_line("Send to (addresses, comma-separated): ")
+            named = [a.strip() for a in typed.split(",") if a.strip()] + named
+
+    unique: list[str] = []
+    for address in named:
+        if address.lower() not in (u.lower() for u in unique):
+            unique.append(address)
+    if not unique:
+        raise ValueError("no recipient — nothing built, nothing sent")
+    bad = [address for address in unique if not mailer.looks_like_address(address)]
+    if bad:
+        raise ValueError(f"not an e-mail address: {', '.join(bad)}")
+    return unique
+
+
+def _mailbox(config: config_module.Config, args: argparse.Namespace) -> config_module.MailConfig:
+    """The mailbox to send from: --mail-from, the only one there is, or the user's pick of several.
+
+    The pick starts on the mailbox this tenant's last report went from. With -y
+    there is no pick: that mailbox is taken, and without one it is an error.
+    """
+    boxes = config.mailboxes
+    if not boxes:
+        raise ValueError(mailer.not_set_up())
+    senders = ", ".join(box.sender for box in boxes)
+    if args.mail_from:
+        box = config_module.mailbox(config, args.mail_from)
+        if box is None:
+            raise ValueError(f"no mailbox {args.mail_from} (mailboxes: {senders}) — add it: suwgit add-mail {args.mail_from}")
+        return box
+    if len(boxes) == 1:
+        return boxes[0]
+
+    last = tenants.last_mail(args.tenant)
+    previous = config_module.mailbox(config, last[1]) if last else None
+    if args.yes:
+        if previous is None:
+            raise ValueError(f"several mailboxes ({senders}) — choose one with --mail-from <address>")
+        print(f"{DIM}sending from {previous.sender}, as the last report for {args.tenant}{RESET}")
+        return previous
+    try:
+        index = picker.choose("Send from which mailbox?", [box.sender for box in boxes], boxes.index(previous) if previous else 0)
+    except picker.NoTerminal:
+        raise ValueError(f"several mailboxes ({senders}) — choose one with --mail-from <address>") from None
+    if index is None:
+        raise ValueError("cancelled — nothing built, nothing sent")
+    return boxes[index]
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     today = date.today()
     last = args.to or today
@@ -334,21 +454,23 @@ def cmd_report(args: argparse.Namespace) -> int:
     if first > last:
         return _fail(f"--from {first} is after --to {last}")
 
-    # Sending is checked before anything is built: a report that cannot go out
-    # should say so at once, not after the model has summarised every project.
-    mail_config = None
+    # Who gets it and from which mailbox is settled before anything is built: a
+    # report that cannot go out should say so at once, not after the model has
+    # summarised every project.
+    mailbox = recipients = None
+    if args.mail_from and not args.mail:
+        return _fail("--mail-from picks the mailbox --mail sends from — add --mail <address>")
     if args.mail:
         if args.format == "json":
             return _fail("--mail sends the PDF — leave out --format json")
         try:
-            mail_config = config_module.load().mail
+            config = config_module.load()
+            recipients = _recipients(args)
+            mailbox = _mailbox(config, args)
         except config_module.ConfigError as exc:
             return _fail(str(exc))
-        if not mail_config.is_configured:
-            return _fail(mailer.not_set_up())
-        bad = [address for address in args.mail if not mailer.looks_like_address(address)]
-        if bad:
-            return _fail(f"not an e-mail address: {', '.join(bad)}")
+        except ValueError as exc:
+            return _fail(str(exc))
 
     repos = tenants.repos_of(args.tenant)
     if not repos:
@@ -396,22 +518,26 @@ def cmd_report(args: argparse.Namespace) -> int:
     print(f"{GREEN}✓{RESET} {BOLD}{target}{RESET}")
     print(f"  {DIM}{len(entries)} commit(s) for {args.tenant}, {first} – {last}: {', '.join(projects)}{RESET}")
 
-    if mail_config is not None:
-        recipients = ", ".join(args.mail)
+    if mailbox is not None:
+        to = ", ".join(recipients)
         if not args.yes:
             # The report is on disk now: open it before it goes to a client.
             # Enter is no, so a stray key never sends anything.
             print(f"\n  {BOLD}Look at the report first:{RESET} {target}")
-            if not _confirm(f"  Send it to {BOLD}{recipients}{RESET} from {mail_config.sender}?", default=False):
+            if not _confirm(f"  Send it to {BOLD}{to}{RESET} from {mailbox.sender}?", default=False):
                 print(f"{DIM}not sent — the report stays at {target}; -y sends without asking{RESET}")
                 return 0
         subject, body = mailer.report_text(f"{first:%Y-%m-%d} – {last:%Y-%m-%d}", _report_author())
-        message = mailer.build(mail_config, args.mail, subject, body, target.read_bytes(), target.name)
+        message = mailer.build(mailbox, recipients, subject, body, target.read_bytes(), target.name)
         try:
-            mailer.send(mail_config, message)
+            mailer.send(mailbox, message)
         except mailer.MailError as exc:
             return _fail(f"the report is at {target}, but it was not sent: {exc}")
-        print(f"{GREEN}✓{RESET} sent to {recipients}  {DIM}from {mail_config.sender}{RESET}")
+        print(f"{GREEN}✓{RESET} sent to {to}  {DIM}from {mailbox.sender}{RESET}")
+        try:
+            tenants.remember_mail(args.tenant, recipients, mailbox.sender)
+        except OSError:
+            pass  # only a convenience for the next bare --mail
     return 0
 
 
@@ -502,6 +628,8 @@ examples:
   suwgit report --tenant lokum --time                   with the hours of every work period
   suwgit report --tenant lokum --format json | jq '.projects[].name'
   suwgit report --tenant lokum --mail client@example.com   PDF, then asks before e-mailing it
+  suwgit report --tenant lokum --mail                      the same, to whoever got lokum's last report
+  suwgit report --tenant lokum --mail a@b.com --mail-from me@work.com   from one of several mailboxes
 
 see the tenants you have, and their repositories and projects:  suwgit list"""
 
@@ -543,7 +671,15 @@ def build_parser() -> argparse.ArgumentParser:
     unregister.add_argument("folder")
     unregister.set_defaults(func=cmd_unregister)
 
-    sub.add_parser("list", help="show the config and every registered repository").set_defaults(func=cmd_list)
+    sub.add_parser("list", help="show the config, every registered repository, tenants and mailboxes").set_defaults(func=cmd_list)
+
+    add_mail = sub.add_parser("add-mail", help="add a mailbox reports can be sent from (or update one)")
+    add_mail.add_argument("address", nargs="?", help="the mailbox's address; asked for if left out")
+    add_mail.set_defaults(func=cmd_add_mail)
+
+    remove_mail = sub.add_parser("remove-mail", help="forget a mailbox, and its password")
+    remove_mail.add_argument("address")
+    remove_mail.set_defaults(func=cmd_remove_mail)
 
     commit = sub.add_parser("commit", help="commit the closest repository above a path, right now")
     commit.add_argument("path", nargs="?", default=".")
@@ -600,10 +736,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--mail",
         action="append",
         metavar="ADDRESS",
-        help="also send the PDF to this address, from the mailbox set up in `suwgit init`; repeat for more. "
+        nargs="?",
+        const=PREVIOUS_RECIPIENTS,
+        help="send the PDF to this address; repeat for more. Bare, it offers this tenant's previous recipients. "
         "Asks [y/N] once the PDF is made, so you can look at it first",
     )
-    report_cmd.add_argument("-y", "--yes", action="store_true", help="with --mail: send without asking")
+    report_cmd.add_argument(
+        "--mail-from",
+        metavar="ADDRESS",
+        help="which of your mailboxes to send from (default: the only one, or a pick of several)",
+    )
+    report_cmd.add_argument(
+        "-y", "--yes", action="store_true", help="with --mail: no questions — send, to the previous recipients for a bare --mail"
+    )
     report_cmd.add_argument(
         "-o",
         "--output",
