@@ -191,6 +191,18 @@ Then ask in plain words, in any language, or use the commands:
 | `/suwgit:push` | `/suwgit:push client work for lokum, project Lokum Shop` |
 | `/suwgit:list` | `/suwgit:list which repos have changes?` |
 | `/suwgit:report` | `/suwgit:report lokum for September, with hours` |
+| `/suwgit:update` | `/suwgit:update` — suwgit and the plugin to the latest version |
+
+To update both suwgit and the plugin later, run `/suwgit:update`. Or do it by
+hand: `git pull` in the clone, then
+
+```
+! claude plugin marketplace update suwalski-git
+! claude plugin update suwgit@suwalski-git
+```
+
+and `/reload-plugins`. Claude Code keeps its own copy of the plugin, so it does
+not change until you update it, but suwgit itself runs straight from the clone.
 
 Without suwgit installed, ask Claude to set it up: it gives you the lines to
 paste, since `init` asks questions only you can answer. Claude asks before

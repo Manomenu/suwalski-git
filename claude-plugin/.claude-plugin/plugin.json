@@ -1,8 +1,9 @@
 {
   "name": "suwgit",
-  "version": "0.1.0",
   "description": "Teaches Claude Code to set up and drive suwgit: LLM-written commits, B2B client work records and work reports, with /suwgit-commit, /suwgit-push, /suwgit-list and /suwgit-report.",
-  "author": { "name": "Piotr Gugnowski" },
+  "author": {
+    "name": "Piotr Gugnowski"
+  },
   "homepage": "https://github.com/Manomenu/suwalski-git",
   "license": "MIT"
 }
