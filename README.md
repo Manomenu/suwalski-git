@@ -159,6 +159,39 @@ suwgit register ~/projects/dashboard
 suwgit list
 ```
 
+## Use it from Claude Code
+
+suwgit ships a [Claude Code](https://claude.com/claude-code) plugin. With it,
+Claude knows how to set suwgit up and runs it for you when you ask in your own
+words. Install it at the Claude Code prompt:
+
+```
+/plugin install suwgit --marketplace Manomenu/suwalski-git
+```
+
+Answer `y` to add the marketplace, then pick a scope: user scope makes it work
+in every project. It needs Claude Code 2.1.275 or later. To install it in two
+steps instead:
+
+```
+/plugin marketplace add Manomenu/suwalski-git
+/plugin install suwgit@suwalski-git
+```
+
+Then ask in plain words, in any language, or use the commands:
+
+| command | example |
+|---|---|
+| `/suwgit:commit` | `/suwgit:commit for lokum, ticket EH-3311111` |
+| `/suwgit:push` | `/suwgit:push client work for lokum, project Lokum Shop` |
+| `/suwgit:list` | `/suwgit:list which repos have changes?` |
+| `/suwgit:report` | `/suwgit:report lokum for September, with hours` |
+
+Without suwgit installed, ask Claude to set it up: it gives you the lines to
+paste, since `init` asks questions only you can answer. Claude asks before
+committing as client work when the client is unclear, never works around a
+commit refused for a possible secret, and never force-pushes.
+
 ## Commands
 
 | command | what it does |
