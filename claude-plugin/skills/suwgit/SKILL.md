@@ -145,6 +145,13 @@ report is still made, without them.
   The commit itself is already safe locally.
 - **`init` is the user's to run** (see Setup). So is `uninstall`.
 
+## Updating
+
+`/suwgit:update` updates both suwgit (a fast-forward pull of a clean clone, and
+a service restart on Linux) and this plugin (a copy Claude Code keeps, which
+does not change by itself). After a plugin update the user runs
+`/reload-plugins`.
+
 ## When something is wrong
 
 - `.suwgit.log` in a repository explains why suwgit last could not commit it:

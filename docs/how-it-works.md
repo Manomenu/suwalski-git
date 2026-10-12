@@ -341,6 +341,13 @@ in the repository root makes the repository its marketplace. It holds no code:
 - `commands/{commit,push,list,report}.md` are `/suwgit:commit` and the others.
   Each takes free text as `$ARGUMENTS`, and may run `suwgit` (and `jq` for
   reports) without a permission prompt.
+- `commands/update.md` is `/suwgit:update`: a fast-forward pull of a clean clone
+  (and a service restart on Linux), then `claude plugin marketplace update` and
+  `claude plugin update`.
+
+`plugin.json` carries no `version` on purpose: Claude Code then takes the
+commit as the plugin's version, so every push is an update `claude plugin
+update` can see, with nothing to bump by hand.
 
 Claude's shell has no terminal, so suwgit's `[Y/n]` question about the last
 `--b2b` values always answers no there. The skill and commands therefore have
