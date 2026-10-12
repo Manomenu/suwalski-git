@@ -593,3 +593,48 @@ def test_a_report_of_the_same_name_is_overwritten(sandbox, tmp_path, monkeypatch
     assert main.main(["report", "--tenant", "lokum"]) == 0
     assert target.read_bytes().startswith(b"%PDF")
     assert len(list(tmp_path.glob("lokum--*.pdf"))) == 1
+
+
+def test_the_report_author_replaces_the_commit_handles():
+    entry = _entry(datetime(2026, 10, 12, 9, 0).astimezone(), datetime(2026, 10, 12, 10, 0).astimezone())
+    generated = datetime(2026, 10, 13, 8, 0).astimezone()
+    assert b"Piotr Gugnowski" in report.build([entry], date(2026, 10, 1), date(2026, 10, 13), generated, author="Piotr Gugnowski")
+    assert b"(Test)" in report.build([entry], date(2026, 10, 1), date(2026, 10, 13), generated)  # no name set: commit authors
+
+
+def test_json_report_goes_to_stdout_and_parses(sandbox, tmp_path, monkeypatch, capsys):
+    import json
+
+    repo = _repo(tmp_path / "repo")
+    _b2b_commit(repo, "work", datetime.now().astimezone() - timedelta(minutes=5), project="Lokum Shop")
+    tenants.record("lokum", repo)
+    monkeypatch.chdir(tmp_path)
+
+    assert main.main(["report", "--tenant", "lokum", "--format", "json"]) == 0
+    document = json.loads(capsys.readouterr().out)  # stdout is the JSON and nothing else
+
+    assert document["tenant"] == "lokum"
+    assert document["period"]["to"] == date.today().isoformat()
+    [project] = document["projects"]
+    [entry] = project["entries"]
+    assert project["name"] == "Lokum Shop"
+    assert (entry["summary"], entry["work_scope"], entry["repository"]) == ("summary of work", ["added work"], str(repo))
+    assert datetime.fromisoformat(entry["work_period"]["start"]).tzinfo is not None
+    assert not list(tmp_path.glob("*.pdf"))  # no file written
+
+
+def test_json_report_of_an_empty_range_is_still_json(sandbox, tmp_path, capsys):
+    import json
+
+    repo = _repo(tmp_path / "repo")
+    _b2b_commit(repo, "old", datetime(2026, 1, 5, 10, 0).astimezone())
+    tenants.record("lokum", repo)
+
+    assert main.main(["report", "--tenant", "lokum", "--format", "json", "--from", "2026-03-01", "--to", "2026-03-31"]) == 0
+    assert json.loads(capsys.readouterr().out)["projects"] == []
+
+
+def test_json_report_refuses_an_output_file(sandbox, tmp_path, capsys):
+    tenants.record("lokum", _repo(tmp_path / "repo"))
+    assert main.main(["report", "--tenant", "lokum", "--format", "json", "-o", str(tmp_path / "r.json")]) == 1
+    assert capsys.readouterr().out == ""

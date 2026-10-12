@@ -1,8 +1,9 @@
 """`suwgit init` — the interactive setup.
 
 Asks where the config should live, for the vLLM endpoint, how often to sweep,
-and whether to start with the session; then puts suwgit on PATH and installs the
-systemd user unit. Re-runnable: every prompt offers the current value as default.
+whether to start with the session, and whose name goes on reports; then puts
+suwgit on PATH and installs the systemd user unit. Re-runnable: every prompt
+offers the current value as default.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import config as config_module
-from . import install, paths
+from . import gitops, install, paths
 from .config import DEFAULT_INTERVAL_HOURS, Config
 
 BOLD = "\033[1m"
@@ -76,7 +77,11 @@ def _place_config(config: Config, use_dotfiles: bool) -> tuple[Path, str]:
     """Write the config to the chosen home, tidying up whatever the other mode left."""
     if use_dotfiles:
         target = config_module.save(config, paths.DOTFILES_CONFIG_FILE)
-        if paths.CONFIG_FILE.exists() and not paths.CONFIG_FILE.is_symlink():
+        # When stow folded the whole ~/.config/suwgit folder into a symlink, the
+        # home path is not a symlink itself but IS the file just written — and
+        # removing it would delete the config.
+        is_same_file = paths.CONFIG_FILE.exists() and paths.CONFIG_FILE.resolve() == target.resolve()
+        if paths.CONFIG_FILE.exists() and not paths.CONFIG_FILE.is_symlink() and not is_same_file:
             # A real file here would make `stow` refuse to lay down its symlink.
             paths.CONFIG_FILE.unlink()
             return target, f"config written to {target} (the old {paths.CONFIG_FILE} was removed so stow can link it)"
@@ -104,6 +109,13 @@ def run() -> int:
     open_on_system_start = _ask_yes_no("  Start with the system?", existing.open_on_system_start)
     push = _ask_yes_no("  Push the branch after committing?", existing.push)
 
+    print(f"\n{BOLD}Reports{RESET}")
+    report_author = _ask(
+        "  Your name on reports (Prepared by)",
+        existing.report_author or gitops.global_user_name(),
+        allow_empty=True,
+    )
+
     config = Config(
         llm=config_module.LlmConfig(
             base_url=base_url.rstrip("/"),
@@ -115,6 +127,7 @@ def run() -> int:
         open_on_system_start=open_on_system_start,
         push=push,
         max_diff_chars=existing.max_diff_chars,
+        report_author=report_author,
         repos=existing.repos,
     )
     _, detail = _place_config(config, use_dotfiles)

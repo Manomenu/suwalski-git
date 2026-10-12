@@ -69,6 +69,9 @@ class Config:
     # How much diff the model may see. Raise it for a big context window, lower
     # it for a small one; the whole diff is sent when it fits.
     max_diff_chars: int = DEFAULT_MAX_DIFF_CHARS
+    # "Prepared by" on `suwgit report`. Empty means the commits' author names,
+    # which are often a handle rather than the name a client should read.
+    report_author: str = ""
     repos: list[RepoEntry] = field(default_factory=list)
 
     def entry(self, root: Path) -> RepoEntry | None:
@@ -143,6 +146,7 @@ def load() -> Config:
         open_on_system_start=bool(raw.get("open_on_system_start", True)),
         push=bool(raw.get("push", False)),
         max_diff_chars=int(raw.get("max_diff_chars", DEFAULT_MAX_DIFF_CHARS)),
+        report_author=str(raw.get("report_author", "")),
         repos=[_repo_entry(item) for item in raw.get("repos", [])],
     )
 

@@ -7,6 +7,7 @@ and turns the result into terminal output. All the thinking lives elsewhere.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -281,6 +282,14 @@ def _day(text: str) -> date:
         raise argparse.ArgumentTypeError(f"{text!r} is not a date — write it as YYYY-MM-DD, e.g. 2026-09-13") from None
 
 
+def _report_author() -> str:
+    """The configured Prepared by name; empty without a config, so the commits' authors stand in."""
+    try:
+        return config_module.load().report_author
+    except config_module.ConfigError:
+        return ""
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     today = date.today()
     last = args.to or today
@@ -294,6 +303,14 @@ def cmd_report(args: argparse.Namespace) -> int:
         return _fail(f"no repository has ever had a B2B commit for {args.tenant} (index: {paths.TENANTS_FILE})")
 
     entries = b2b.collect(repos, args.tenant, first, last)
+    if args.format == "json":
+        # stdout carries the JSON and nothing else, so it pipes into jq; an empty
+        # range is still a valid answer there, not an error.
+        if args.output:
+            return _fail("-o is for the PDF — send the JSON to a file with  > report.json")
+        document = report.as_json(entries, args.tenant, first, last, datetime.now().astimezone(), author=_report_author())
+        print(json.dumps(document, indent=2, ensure_ascii=False))
+        return 0
     if not entries:
         return _fail(f"no B2B commits of yours for {args.tenant} between {first} and {last}, in {len(repos)} repositories")
 
@@ -305,7 +322,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     target = target.resolve()
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(report.build(entries, first, last, datetime.now().astimezone(), with_time=args.time))
+        target.write_bytes(report.build(entries, first, last, datetime.now().astimezone(), with_time=args.time, author=_report_author()))
     except OSError as exc:
         return _fail(f"cannot write {target}: {exc}")
     projects = sorted({e.project for e in entries})
@@ -433,6 +450,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--from", dest="since", type=_day, help=f"first day, YYYY-MM-DD (default: the last {REPORT_DAYS} days up to --to)"
     )
     report_cmd.add_argument("--time", action="store_true", help="show the hours of every work period, not only the days")
+    report_cmd.add_argument(
+        "--format",
+        choices=("pdf", "json"),
+        default="pdf",
+        help="pdf writes a file (default); json prints the report to stdout, for jq",
+    )
     report_cmd.add_argument("--to", type=_day, help="last day, inclusive, YYYY-MM-DD (default: today)")
     report_cmd.add_argument(
         "-o",

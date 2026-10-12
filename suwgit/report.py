@@ -160,11 +160,12 @@ def _entry_rows(entry: Entry, width: float, with_time: bool) -> list[tuple[str, 
     ]
 
 
-def build(entries: list[Entry], first: date, last: date, generated: datetime, with_time: bool = False) -> bytes:
+def build(entries: list[Entry], first: date, last: date, generated: datetime, with_time: bool = False, author: str = "") -> bytes:
     """The whole report as PDF bytes. `entries` come sorted by project, then time.
 
     Days only by default; `with_time` adds the hours and minutes of every work
-    period, and the timezone they are in.
+    period, and the timezone they are in. `author` is the Prepared by line;
+    empty, it lists the commits' author names.
     """
     doc = _Document()
     width = PAGE_WIDTH - 2 * MARGIN
@@ -177,7 +178,7 @@ def build(entries: list[Entry], first: date, last: date, generated: datetime, wi
     doc.y -= 26
     header = [
         ("Period", span),
-        ("Prepared by", ", ".join(authors) or "—"),
+        ("Prepared by", author or ", ".join(authors) or "—"),
         ("Generated", f"{generated:%Y-%m-%d %H:%M}" if with_time else f"{generated:%Y-%m-%d}"),
     ]
     if with_time:
@@ -231,6 +232,42 @@ def build(entries: list[Entry], first: date, last: date, generated: datetime, wi
             doc.y -= 18
 
     return doc.render(title=f"Work report {span}", footer=f"Work report  ·  {span}")
+
+
+def as_json(entries: list[Entry], tenant: str, first: date, last: date, generated: datetime, author: str = "") -> dict:
+    """The same report as data, for `--format json` — everything the PDF shows, plus
+    what tooling needs and a client does not: the tenant, the technical title, full
+    commit hashes, repository paths and exact times."""
+    projects: dict[str, list[Entry]] = {}
+    for entry in entries:
+        projects.setdefault(entry.project, []).append(entry)
+    return {
+        "tenant": tenant,
+        "period": {"from": first.isoformat(), "to": last.isoformat()},
+        "prepared_by": author or ", ".join(sorted({e.author for e in entries if e.author})),
+        "generated": generated.isoformat(timespec="seconds"),
+        "projects": [
+            {
+                "name": name,
+                "entries": [
+                    {
+                        "work_period": {
+                            "start": e.start.isoformat(timespec="minutes"),
+                            "end": e.end.isoformat(timespec="minutes"),
+                        },
+                        "summary": e.summary,
+                        "title": e.title,
+                        "work_scope": e.work_scope,
+                        "commit": e.commit,
+                        "repository": str(e.repo),
+                        "author": e.author,
+                    }
+                    for e in items
+                ],
+            }
+            for name, items in projects.items()
+        ],
+    }
 
 
 def default_filename(tenant: str, today: date) -> str:

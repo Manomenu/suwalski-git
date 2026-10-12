@@ -274,6 +274,14 @@ def seconds_since_last_change(root: Path, status: str, now: float | None = None)
     return max(0.0, (time.time() if now is None else now) - times[1])
 
 
+def global_user_name() -> str:
+    """`git config --global user.name`, or empty if none is set."""
+    try:
+        return _git(None, "config", "--global", "user.name").strip()
+    except GitError:
+        return ""
+
+
 def user_email(root: Path) -> str:
     """The committer email git would use in `root`, or empty if none is set."""
     try:
