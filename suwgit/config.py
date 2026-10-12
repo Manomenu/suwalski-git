@@ -44,6 +44,21 @@ class LlmConfig:
 
 
 @dataclass
+class RepoEntry:
+    """One registered repository and how suwgit treats it."""
+
+    path: str
+    # Swept by the daemon. Off for a repository you only want in reports, and
+    # commit yourself with `suwgit commit`.
+    auto_commit: bool = True
+    # What a bare `--b2b` / `--project` on `suwgit commit` and `push` stand for
+    # here. A plain `suwgit commit` stays ordinary; the daemon's sweeps, with
+    # auto_commit on, commit B2B under these whenever a tenant is set.
+    default_tenant: str = ""
+    default_project: str = ""
+
+
+@dataclass
 class Config:
     llm: LlmConfig = field(default_factory=LlmConfig)
     interval_hours: float = DEFAULT_INTERVAL_HOURS
@@ -54,7 +69,11 @@ class Config:
     # How much diff the model may see. Raise it for a big context window, lower
     # it for a small one; the whole diff is sent when it fits.
     max_diff_chars: int = DEFAULT_MAX_DIFF_CHARS
-    repos: list[str] = field(default_factory=list)
+    repos: list[RepoEntry] = field(default_factory=list)
+
+    def entry(self, root: Path) -> RepoEntry | None:
+        """The registry entry for `root`, if it is registered."""
+        return next((e for e in self.repos if e.path == str(root)), None)
 
     @property
     def interval_seconds(self) -> float:
@@ -124,7 +143,19 @@ def load() -> Config:
         open_on_system_start=bool(raw.get("open_on_system_start", True)),
         push=bool(raw.get("push", False)),
         max_diff_chars=int(raw.get("max_diff_chars", DEFAULT_MAX_DIFF_CHARS)),
-        repos=[str(p) for p in raw.get("repos", [])],
+        repos=[_repo_entry(item) for item in raw.get("repos", [])],
+    )
+
+
+def _repo_entry(item) -> RepoEntry:
+    """A registry entry, from either shape: a bare path (older configs) or an object."""
+    if isinstance(item, str):
+        return RepoEntry(path=item)
+    return RepoEntry(
+        path=str(item["path"]),
+        auto_commit=bool(item.get("auto_commit", True)),
+        default_tenant=str(item.get("default_tenant", "")),
+        default_project=str(item.get("default_project", "")),
     )
 
 
@@ -151,20 +182,44 @@ def save(config: Config, path: Path | None = None) -> Path:
     return target
 
 
-def register(config: Config, repo_root: Path) -> bool:
-    """Add a repository to the registry. False if it was already there."""
-    entry = str(repo_root)
-    if entry in config.repos:
-        return False
-    config.repos.append(entry)
-    config.repos.sort()
-    return True
+def register(
+    config: Config,
+    repo_root: Path,
+    auto_commit: bool | None = None,
+    default_tenant: str | None = None,
+    default_project: str | None = None,
+) -> str:
+    """Add a repository to the registry, or change the settings of one already there.
+
+    A setting left as None keeps what the entry has (or the default, for a new
+    one), so registering again with one flag changes that flag only. An empty
+    string clears a default.
+    Returns "added", "updated" or "unchanged".
+    """
+    entry = config.entry(repo_root)
+    status = "updated"
+    if entry is None:
+        entry = RepoEntry(path=str(repo_root))
+        config.repos.append(entry)
+        config.repos.sort(key=lambda e: e.path)
+        status = "added"
+
+    before = (entry.auto_commit, entry.default_tenant, entry.default_project)
+    if auto_commit is not None:
+        entry.auto_commit = auto_commit
+    if default_tenant is not None:
+        entry.default_tenant = default_tenant
+    if default_project is not None:
+        entry.default_project = default_project.strip()
+    if status == "updated" and (entry.auto_commit, entry.default_tenant, entry.default_project) == before:
+        return "unchanged"
+    return status
 
 
 def unregister(config: Config, repo_root: Path) -> bool:
     """Drop a repository from the registry. False if it was not registered."""
-    entry = str(repo_root)
-    if entry not in config.repos:
+    entry = config.entry(repo_root)
+    if entry is None:
         return False
     config.repos.remove(entry)
     return True

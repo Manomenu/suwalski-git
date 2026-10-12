@@ -242,24 +242,62 @@ def _status_paths(status: str) -> list[str]:
     return names
 
 
+def change_times(root: Path, status: str) -> tuple[float, float] | None:
+    """(oldest, newest) modification time among the uncommitted files.
+
+    Only files git already calls dirty are considered, which keeps build output
+    and ignored junk out of it. None when nothing datable is left — every dirty
+    path was deleted, or the tree is clean.
+    """
+    times = []
+    for name in _status_paths(status):
+        try:
+            times.append((root / name).stat().st_mtime)
+        except OSError:
+            continue  # deleted, or a path we cannot stat — it says nothing about activity
+    if not times:
+        return None
+    return min(times), max(times)
+
+
 def seconds_since_last_change(root: Path, status: str, now: float | None = None) -> float | None:
     """How long ago the newest uncommitted file was touched, in seconds.
 
     This is the daemon's "are they still typing?" test, so it looks at
-    modification times rather than at git: only files git already calls dirty
-    are considered, which keeps build output and ignored junk out of it.
+    modification times rather than at git.
 
-    None when nothing datable is left — every dirty path was deleted, or the
-    tree is clean. The caller reads that as "no reason to wait".
+    None when nothing datable is left. The caller reads that as "no reason to wait".
     """
-    newest = None
-    for name in _status_paths(status):
-        try:
-            mtime = (root / name).stat().st_mtime
-        except OSError:
-            continue  # deleted, or a path we cannot stat — it says nothing about activity
-        if newest is None or mtime > newest:
-            newest = mtime
-    if newest is None:
+    times = change_times(root, status)
+    if times is None:
         return None
-    return max(0.0, (time.time() if now is None else now) - newest)
+    return max(0.0, (time.time() if now is None else now) - times[1])
+
+
+def user_email(root: Path) -> str:
+    """The committer email git would use in `root`, or empty if none is set."""
+    try:
+        return _git(root, "config", "user.email").strip()
+    except GitError:
+        return ""
+
+
+def commit_messages(root: Path, since: str, author: str = "") -> list[tuple[str, str, str]]:
+    """(full hash, author name, full message) of every commit on any branch since `since`, oldest first.
+
+    `--all`, because work for a client may sit on a branch that is not merged
+    yet, and still has to be reported.
+    """
+    if not has_head(root):
+        return []
+    args = ["log", "--all", "--reverse", f"--since={since}", "--format=%H%x1f%an%x1f%B%x1e"]
+    if author:
+        args.append(f"--author={author}")
+    out = _git(root, *args)
+    commits = []
+    for record in out.split("\x1e"):
+        if "\x1f" not in record:
+            continue
+        sha, name, message = record.split("\x1f", 2)
+        commits.append((sha.strip(), name.strip(), message.strip()))
+    return commits

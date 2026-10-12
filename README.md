@@ -64,11 +64,12 @@ suwgit list
 | command | what it does |
 |---|---|
 | `suwgit init` | interactive setup; safe to run again |
-| `suwgit register <folder>` | watch a repository (it must have a git remote) |
+| `suwgit register <folder>` | watch a repository (it must have a git remote); run it again to change its settings — `--default-b2b <tenant>` / `--no-default-b2b`, `--default-project <name>`, `--auto-commit` / `--no-auto-commit` |
 | `suwgit unregister <folder>` | stop watching it |
 | `suwgit list` | config, service state, and which repositories are dirty |
-| `suwgit commit [path]` | commit the closest repository above `path` now, and print the message (`--push` / `--no-push` override the config for one run) |
+| `suwgit commit [path]` | commit the closest repository above `path` now, and print the message (`--push` / `--no-push` override the config for one run; `--b2b [tenant]` and `--project [name]` make it a B2B commit, `-y` skips the confirmation) |
 | `suwgit push [path]` | the same thing with the push forced on |
+| `suwgit report --tenant <tenant>` | a PDF of your B2B commits for one client (`--from` / `--to` as `YYYY-MM-DD`, default: the last 30 days, today included; `-o` for a file or a folder, default: the current folder) |
 | `suwgit logs [-n N] [-f]` | the daemon log, through [`bat`](https://github.com/sharkdp/bat) if you have it |
 | `suwgit daemon [--once]` | the loop systemd runs |
 | `suwgit uninstall [--purge]` | remove it from `PATH`, systemd and its logs; **keeps your config** unless `--purge` |
@@ -105,6 +106,121 @@ are left alone.
 Treat it as a safety net, not a guarantee: it is a language model's judgement,
 so it will not catch everything. Keep your `.gitignore` honest.
 
+## Commits as a record of work (B2B)
+
+Working for a client on a B2B contract, your commit history can double as the
+record that the work was done. A commit becomes a record when you ask for one,
+with the client's **tenant**, a short working name of your choosing:
+
+```bash
+suwgit commit --b2b lokum --project "Lokum Shop"
+```
+
+```
+[feature] added order checkout flow
+
+Summary: Customers can now pay for their order directly in the shop, and orders with a wrong total are stopped before payment.
+
+Work-Scope:
+- added a checkout page where customers enter their address and pay
+- made the shop double-check the order total before taking payment
+
+Project: Lokum Shop
+Tenant: lokum
+Work-Period: 2026-10-12T09:14+02:00/2026-10-12T11:04+02:00
+```
+
+- **Summary** and **Work-Scope** are written by the model for a client who is
+  not technical: what changed for them and their users, in plain words, with no
+  jargon, file names or code. Summary is one or two sentences, and Work-Scope
+  lists the pieces of work behind it, one item each. The title stays technical,
+  for you and `git log`. B2B mode requires both: if the model leaves one out,
+  nothing is committed and the reason goes into `.suwgit.log`.
+- **Project** is what the client sees. The report has one section per
+  project. Without `--project` it is the folder name.
+- **Tenant** is your key for filtering. It is never printed in the report.
+- **Work-Period** runs from the oldest modification time among the committed
+  files to the newest plus two minutes, never later than the moment of the
+  commit. It is an ISO 8601 interval with the UTC offset in it. A file saved
+  twice only remembers the second save, so the start is an estimate on the
+  late side.
+
+In the report, the Summary takes the place of the technical title.
+
+`Project`, `Tenant` and `Work-Period` are ordinary git trailers, so
+`git log --format='%(trailers)'` reads them too.
+
+By hand, a commit is B2B only with `--b2b`: in a repository shared with work
+for other clients, whether a change is client work is yours to say, one commit
+at a time.
+
+### Defaults per repository
+
+So you do not have to type the client every time, a repository can remember
+what a bare `--b2b` and `--project` stand for:
+
+```bash
+suwgit register ~/projects/shop --default-b2b lokum --default-project "Lokum Shop"
+```
+
+| in that repository | commits as |
+|---|---|
+| `suwgit commit` | an ordinary commit, as always |
+| a daemon sweep | B2B for `lokum`, project `Lokum Shop` |
+| `suwgit commit --b2b` | B2B for `lokum`, project `Lokum Shop` |
+| `suwgit push --b2b acme` | B2B for `acme`, project `Lokum Shop` |
+| `suwgit push --b2b acme --project "Acme CRM"` | B2B for `acme`, project `Acme CRM` |
+
+With no default set, a bare `--b2b` falls back to the tenant and project of
+the last `--b2b` commit you made by hand in that repository, and asks first:
+
+```console
+$ suwgit push --b2b
+Commit and push shop as B2B for lokum, project Lokum Shop (last used here)? [Y/n]
+```
+
+Enter means yes. `-y` / `--yes` skips the question, and with no terminal to
+answer it nothing is committed. The last values are kept per repository in
+`~/.local/state/suwgit/last-b2b.json`. A different tenant never inherits the
+last project: `--b2b acme` after a commit for `lokum` gets the folder name,
+not Lokum's project.
+
+A bare `--b2b` or `--project` with nothing to fall back on stops before
+anything is committed and tells you both ways out: name the value, or set the
+default. Without a default project, leaving `--project` out gives the
+folder name. `--no-default-b2b` and `--default-project ''` forget the defaults.
+
+Write the path before the flags (`suwgit commit ~/projects/shop --b2b`):
+a bare `--b2b` would otherwise take the path for a tenant name.
+
+A daemon sweep commits as a bare `--b2b` would wherever a default tenant is
+set, so work in a client's repository is recorded even when nobody asked. A
+repository shared with other work is better registered with
+`--no-auto-commit` and committed by hand, so the daemon never files someone
+else's work under the client.
+
+### The report
+
+```bash
+suwgit report --tenant lokum --from 2026-09-13 --to 2026-10-13
+```
+
+This writes `lokum--<today>.pdf` (e.g. `lokum--2026-10-13.pdf`) in the current
+folder, or wherever `-o` points, a file or a folder. It holds a title block, a
+summary per project, then each project's commits, each with its Work period,
+Summary, Work scope and commit hash. All of it is client-facing; the
+technical title is left out. The second and every later project start
+on a new page. Dates are ISO only, because `9/10/2026` means a different
+month depending on who reads it. A commit counts when its work started within
+the range, both ends included.
+
+There is no database. Each B2B commit adds its repository to
+`~/.local/state/suwgit/tenants.json`, and the report reads the git history of
+every repository listed there for that tenant, on every branch. Only commits
+under your own `user.email` count, so in a shared repository a colleague's
+commits are not in your report. The index only says where to look. Losing it
+loses no work: the history is the record.
+
 ## Configuration
 
 `~/.config/suwgit/config.json`:
@@ -121,7 +237,9 @@ so it will not catch everything. Keep your `.gitignore` honest.
   "open_on_system_start": true,
   "push": false,
   "max_diff_chars": 400000,
-  "repos": []
+  "repos": [
+    {"path": "/home/you/projects/shop", "auto_commit": true, "default_tenant": "lokum", "default_project": "Lokum Shop"}
+  ]
 }
 ```
 
@@ -133,6 +251,7 @@ so it will not catch everything. Keep your `.gitignore` honest.
 | `interval_hours` | how often to look; hours only |
 | `push` | push after each commit, sweeps included; off by default |
 | `max_diff_chars` | how much of the diff the model reads |
+| `repos` | written by `register`; `auto_commit: false` keeps the daemon away; `default_tenant` / `default_project` are what a bare `--b2b` / `--project` mean there. A bare path, as older versions wrote it, still works |
 
 The default `max_diff_chars` sends the whole diff in almost every case. Lower it
 if your model has a small context window, or if you would rather it read less
@@ -151,6 +270,8 @@ repository updates the tracked file directly.
 | API key | `~/.local/state/suwgit/api_key`, chmod 600 — **never** in the config file, which may be tracked by git |
 | log | `~/.local/state/suwgit/suwgit.log`, one file, hard-capped at 5 MB |
 | locks | `~/.local/state/suwgit/locks/` |
+| tenant index | `~/.local/state/suwgit/tenants.json`: which repositories hold B2B commits for which tenant. Kept by `uninstall`, removed by `--purge` |
+| last `--b2b` | `~/.local/state/suwgit/last-b2b.json`: the tenant and project last used by hand, per repository |
 | blocker notes | `.suwgit.log` in the repository itself — see below |
 | unit | `~/.config/systemd/user/suwgit.service` |
 

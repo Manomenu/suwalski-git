@@ -4,7 +4,7 @@
 import subprocess
 
 from suwgit import committer, gitops
-from suwgit.config import Config, LlmConfig
+from suwgit.config import Config, LlmConfig, RepoEntry
 from suwgit.llm import LlmUnavailable, Suggestion
 from suwgit.locking import repo_lock
 
@@ -24,7 +24,7 @@ def _config():
 
 def test_commits_with_the_suggested_message(sandbox, tmp_path, monkeypatch):
     repo = _repo(tmp_path / "repo")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[feature] added a file"))
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree, **_: Suggestion("[feature] added a file"))
 
     result = committer.commit_repo(_config(), repo)
 
@@ -36,7 +36,7 @@ def test_commits_with_the_suggested_message(sandbox, tmp_path, monkeypatch):
 def test_unreachable_llm_leaves_the_tree_alone_and_does_not_raise(sandbox, tmp_path, monkeypatch):
     repo = _repo(tmp_path / "repo")
 
-    def boom(cfg, tree):
+    def boom(cfg, tree, **_):
         raise LlmUnavailable("cannot reach http://vllm:8000/v1")
 
     monkeypatch.setattr(committer, "suggest_commit_message", boom)
@@ -52,7 +52,7 @@ def test_clean_repository_is_skipped_without_calling_the_model(sandbox, tmp_path
     repo = _repo(tmp_path / "repo")
     gitops.commit_all(repo, "[chore] init")
 
-    def refuse(cfg, tree):
+    def refuse(cfg, tree, **_):
         raise AssertionError("the model must not be asked about a clean tree")
 
     monkeypatch.setattr(committer, "suggest_commit_message", refuse)
@@ -67,7 +67,7 @@ def test_interrupted_rebase_is_skipped(sandbox, tmp_path, monkeypatch):
     gitops.commit_all(repo, "[chore] init")
     (repo / "a.txt").write_text("changed")
     (repo / ".git" / "MERGE_HEAD").write_text("deadbeef")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[chore] nope"))
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree, **_: Suggestion("[chore] nope"))
 
     result = committer.commit_repo(_config(), repo)
     assert result.committed is False
@@ -76,7 +76,7 @@ def test_interrupted_rebase_is_skipped(sandbox, tmp_path, monkeypatch):
 
 def test_a_locked_repository_is_left_to_the_other_process(sandbox, tmp_path, monkeypatch):
     repo = _repo(tmp_path / "repo")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[chore] should not happen"))
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree, **_: Suggestion("[chore] should not happen"))
 
     with repo_lock(repo):
         result = committer.commit_repo(_config(), repo)
@@ -91,6 +91,6 @@ def test_a_sweep_reports_commits_and_pushes_separately(sandbox, tmp_path, monkey
 
     repo = _repo(tmp_path / "repo")
     gitops.commit_all(repo, "[chore] init")
-    monkeypatch.setattr(config_module, "load", lambda: Config(repos=[str(repo)]))
+    monkeypatch.setattr(config_module, "load", lambda: Config(repos=[RepoEntry(str(repo))]))
 
     assert daemon.run_once() == (0, 0, 0)

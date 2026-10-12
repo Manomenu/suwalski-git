@@ -10,7 +10,7 @@ import subprocess
 import time
 
 from suwgit import committer, daemon, gitops
-from suwgit.config import QUIET_FRACTION, Config, LlmConfig
+from suwgit.config import QUIET_FRACTION, Config, LlmConfig, RepoEntry
 from suwgit.llm import Suggestion
 
 
@@ -33,7 +33,7 @@ def _age(path, seconds):
     os.utime(path, (when, when))
 
 
-def _never_asked(cfg, tree):
+def _never_asked(cfg, tree, **_):
     raise AssertionError("the model must not be asked about changes that are still warm")
 
 
@@ -51,7 +51,7 @@ def test_warm_changes_are_deferred(sandbox, tmp_path, monkeypatch):
 def test_settled_changes_are_committed(sandbox, tmp_path, monkeypatch):
     repo = _repo(tmp_path / "repo")
     _age(repo / "a.txt", 7200)
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[feature] added a file"))
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree, **_: Suggestion("[feature] added a file"))
 
     result = committer.commit_repo(_config(), repo, quiet_seconds=3600)
 
@@ -71,7 +71,7 @@ def test_the_newest_file_decides(sandbox, tmp_path, monkeypatch):
 
 def test_manual_commit_ignores_the_quiet_period(sandbox, tmp_path, monkeypatch):
     repo = _repo(tmp_path / "repo")  # just written, as warm as it gets
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[feature] added a file"))
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree, **_: Suggestion("[feature] added a file"))
 
     result = committer.commit_repo(_config(), repo)
 
@@ -84,7 +84,7 @@ def test_a_deleted_file_does_not_hold_a_repository_back(sandbox, tmp_path, monke
     subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(repo), "commit", "-qm", "first"], check=True)
     (repo / "a.txt").unlink()
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[remove] dropped a file"))
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree, **_: Suggestion("[remove] dropped a file"))
 
     assert committer.commit_repo(_config(), repo, quiet_seconds=3600).committed
 
@@ -96,7 +96,7 @@ def test_quiet_period_is_three_quarters_of_the_interval(sandbox):
 
 def test_sweep_reports_deferred_repositories(sandbox, tmp_path, monkeypatch):
     repo = _repo(tmp_path / "repo")
-    config = _config(repos=[str(repo)])
+    config = _config(repos=[RepoEntry(str(repo))])
     monkeypatch.setattr(daemon.config_module, "load", lambda: config)
     monkeypatch.setattr(committer, "suggest_commit_message", _never_asked)
 

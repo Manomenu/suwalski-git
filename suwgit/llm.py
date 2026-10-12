@@ -20,11 +20,12 @@ it strips reasoning and preambles and finds the message inside whatever came bac
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .config import LlmConfig
 from .gitops import WorkingTree
@@ -46,6 +47,9 @@ CATEGORIES = (
 )
 
 MAX_DESCRIPTION_CHARS = 210
+MAX_WORK_SCOPE_ITEMS = 8
+MAX_WORK_SCOPE_ITEM_CHARS = 200
+MAX_SUMMARY_CHARS = 300
 # Headroom for a backend that ignores the switch below and thinks anyway. With
 # thinking off the answer is ~36 tokens, so this costs nothing when it is honoured.
 MAX_TOKENS = 3000
@@ -116,6 +120,62 @@ a test fixture with an obviously fake value, or a key that is being REMOVED by
 this diff.
 """
 
+# B2B mode: the commit is also the record of work done for a client, so the
+# model lists that work as its own field — a list, not prose, so every item
+# becomes one line of the report.
+B2B_RESPONSE_SCHEMA = copy.deepcopy(RESPONSE_SCHEMA)
+B2B_RESPONSE_SCHEMA["json_schema"]["name"] = "b2b_commit_message"
+B2B_RESPONSE_SCHEMA["json_schema"]["schema"]["properties"]["work_scope"] = {
+    "type": "array",
+    "minItems": 1,
+    "maxItems": MAX_WORK_SCOPE_ITEMS,
+    "items": {"type": "string"},
+}
+B2B_RESPONSE_SCHEMA["json_schema"]["schema"]["properties"]["summary"] = {"type": "string"}
+B2B_RESPONSE_SCHEMA["json_schema"]["schema"]["required"] += ["summary", "work_scope"]
+
+B2B_PROMPT = (
+    SYSTEM_PROMPT
+    + f"""
+These changes are work done for a client, and the commit is the record that the
+work was done. The client reads it in a monthly work report, and the client is
+NOT technical: a business owner or manager who knows their product, not its
+code. So the JSON object holds two more fields, both written for that reader:
+
+- "summary": what this work is, in one or two plain sentences, at most 40 words.
+  Say what is different now for the client or their users, and why it matters.
+- "work_scope": the work behind it, as 1 to {MAX_WORK_SCOPE_ITEMS} items. Each item is one
+  concrete piece of work, past tense, at most 20 words.
+
+How to write both:
+- Describe what people can now do, see or rely on, not how the code does it.
+- No jargon: no endpoint, API, refactor, schema, component, migration, commit,
+  repository, null, cache, regex, dependency — say what it means instead
+  ("the server", "the database", "behind the scenes" are fine). If a technical
+  term is unavoidable, say what it is for in the same sentence.
+- No file names, function names, code identifiers, file counts or line counts.
+- Be concrete and honest: the client must recognise real work, so name the
+  screen, feature or problem. Do not inflate small changes or invent benefits.
+- Behind-the-scenes work (tests, cleanup, upgrades, tooling) is real work too:
+  say what it protects or makes easier, e.g. "added automatic checks so the
+  checkout keeps working after future changes".
+
+Good:
+  "summary": "Customers can now pay for their order directly in the shop, and
+  orders with a wrong total are stopped before payment."
+  "work_scope": [
+    "added a checkout page where customers enter their address and pay",
+    "made the shop double-check the order total before taking payment",
+    "added automatic checks that the checkout keeps working after future changes"
+  ]
+
+Bad (too technical for this reader):
+  "summary": "Implemented POST /api/orders endpoint with Stripe integration
+  and refactored CartService."
+  "work_scope": ["added OrderSchema validation", "updated checkout.tsx"]
+"""
+)
+
 
 @dataclass
 class Suggestion:
@@ -124,6 +184,8 @@ class Suggestion:
     message: str
     unsafe: bool = False
     unsafe_reason: str = ""
+    work_scope: list[str] = field(default_factory=list)  # B2B mode only
+    summary: str = ""  # B2B mode only: the plain-language version, for the client
 
 
 class LlmUnavailable(Exception):
@@ -216,7 +278,30 @@ def build(categories: list[str], description: str) -> str:
     return f"[{','.join(kept)}] {description}"
 
 
-def parse_structured(content: str) -> str:
+def clean_summary(text) -> str:
+    """The client summary on one line, cut at a word if it runs long."""
+    text = " ".join(str(text).split()).strip('"')
+    if len(text) > MAX_SUMMARY_CHARS:
+        text = text[:MAX_SUMMARY_CHARS].rsplit(" ", 1)[0].rstrip(",") + "…"
+    return text
+
+
+def clean_work_scope(items) -> list[str]:
+    """Work scope items as single lines: no bullets, no blanks, no runaway length."""
+    if isinstance(items, str):
+        items = items.splitlines()
+    kept = []
+    for item in items if isinstance(items, list) else []:
+        text = " ".join(str(item).split()).lstrip("-*• ").rstrip(".")
+        if not text:
+            continue
+        if len(text) > MAX_WORK_SCOPE_ITEM_CHARS:
+            text = text[:MAX_WORK_SCOPE_ITEM_CHARS].rsplit(" ", 1)[0].rstrip(",") + "…"
+        kept.append(text)
+    return kept[:MAX_WORK_SCOPE_ITEMS]
+
+
+def parse_structured(content: str) -> Suggestion:
     """Read the JSON object the schema forced the model to produce."""
     text = strip_reasoning(content).strip().strip("`")
     start, end = text.find("{"), text.rfind("}")
@@ -237,6 +322,8 @@ def parse_structured(content: str) -> str:
         message=build(list(categories), payload.get("description", "")),
         unsafe=bool(payload.get("unsafe_for_commit", False)),
         unsafe_reason=" ".join(str(payload.get("unsafe_reason") or "").split()),
+        work_scope=clean_work_scope(payload.get("work_scope") or []),
+        summary=clean_summary(payload.get("summary") or ""),
     )
 
 
@@ -274,21 +361,27 @@ def parse_free_text(content: str) -> Suggestion:
     return Suggestion(build([], lines[-1]))
 
 
-def suggest_commit_message(config: LlmConfig, tree: WorkingTree) -> Suggestion:
-    """The whole point: uncommitted changes in, one commit message out."""
+def suggest_commit_message(config: LlmConfig, tree: WorkingTree, b2b: bool = False) -> Suggestion:
+    """The whole point: uncommitted changes in, one commit message out.
+
+    With `b2b` the suggestion also carries a plain-language summary and a work
+    scope for the client, and both are required: a B2B commit without them is
+    no record of work, so an answer that lacks one raises instead of falling
+    back to a bare title.
+    """
     if not config.is_configured:
         raise LlmUnavailable("LLM base_url/model not configured — run `suwgit init`")
 
     payload = {
         "model": config.model,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": B2B_PROMPT if b2b else SYSTEM_PROMPT},
             {"role": "user", "content": _user_prompt(tree)},
         ],
         "temperature": 0.2,
         "max_tokens": MAX_TOKENS,
         "stream": False,
-        "response_format": RESPONSE_SCHEMA,
+        "response_format": B2B_RESPONSE_SCHEMA if b2b else RESPONSE_SCHEMA,
         "chat_template_kwargs": NO_THINKING,
     }
 
@@ -304,6 +397,12 @@ def suggest_commit_message(config: LlmConfig, tree: WorkingTree) -> Suggestion:
             content = _content(_post(config, payload))
         except _HttpFailure as retry_exc:
             raise LlmUnavailable(f"HTTP {retry_exc.status} from {config.base_url}: {retry_exc.detail}") from None
+
+    if b2b:
+        suggestion = parse_structured(content)
+        if not suggestion.work_scope or not suggestion.summary:
+            raise LlmUnavailable("B2B mode needs a summary and a work scope, and the model left one out")
+        return suggestion
 
     try:
         return parse_structured(content)
