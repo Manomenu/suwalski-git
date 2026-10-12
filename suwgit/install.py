@@ -140,7 +140,7 @@ def link_into_path() -> tuple[bool, str]:
     shims = render_shims()
     for shim in shims:
         if shim.exists() and not _is_ours(shim):
-            return False, f"{shim} exists and is not ours — remove it and re-run `just install`"
+            return False, f"{shim} exists and is not ours — remove it and re-run `./bin/suwgit init`"
     for shim, body in shims.items():
         # LF for both: bash chokes on a CR, and cmd reads either.
         shim.write_text(body, encoding="utf-8", newline="\n")

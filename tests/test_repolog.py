@@ -104,7 +104,7 @@ def test_a_secret_blocks_and_is_written_into_the_repository(sandbox, tmp_path, m
     monkeypatch.setattr(
         committer,
         "suggest_commit_message",
-        lambda cfg, tree: Suggestion("", unsafe=True, unsafe_reason="prod.env holds a real key"),
+        lambda cfg, tree, **_: Suggestion("", unsafe=True, unsafe_reason="prod.env holds a real key"),
     )
 
     result = committer.commit_repo(_config(), repo)
@@ -116,7 +116,7 @@ def test_a_secret_blocks_and_is_written_into_the_repository(sandbox, tmp_path, m
 def test_an_unreachable_model_is_written_into_the_repository(sandbox, tmp_path, monkeypatch):
     repo = _repo(tmp_path / "repo")
 
-    def boom(cfg, tree):
+    def boom(cfg, tree, **_):
         raise LlmUnavailable("cannot reach http://vllm:8000/v1")
 
     monkeypatch.setattr(committer, "suggest_commit_message", boom)
@@ -128,7 +128,7 @@ def test_an_unreachable_model_is_written_into_the_repository(sandbox, tmp_path, 
 def test_a_successful_commit_removes_the_log(sandbox, tmp_path, monkeypatch):
     repo = _repo(tmp_path / "repo")
     repolog.record_blocker(repo, "LLM unavailable: connection refused")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[feature] added a file"))
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree, **_: Suggestion("[feature] added a file"))
 
     assert committer.commit_repo(_config(), repo).committed
     assert not (repo / repolog.LOG_NAME).exists()

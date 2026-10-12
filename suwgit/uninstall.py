@@ -85,6 +85,6 @@ def run(purge: bool = False, assume_yes: bool = False) -> int:
     for line in install.uninstall_task() + install.unlink_from_path() + remove(doomed):
         print(f"  {line}" if line.startswith(YELLOW) else f"  {GREEN}✓{RESET} {line}")
 
-    tail = "" if purge else " Your config is still there — `just install` picks it straight back up."
+    tail = "" if purge else " Your config is still there — `./bin/suwgit init` picks it straight back up."
     print(f"\n{GREEN}✓{RESET} suwgit is uninstalled.{tail}\n")
     return 0

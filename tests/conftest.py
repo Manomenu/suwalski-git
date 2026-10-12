@@ -17,6 +17,8 @@ def sandbox(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "LOG_FILE", tmp_path / "state" / "suwgit" / "suwgit.log")
     monkeypatch.setattr(paths, "LOCK_DIR", tmp_path / "state" / "suwgit" / "locks")
     monkeypatch.setattr(paths, "API_KEY_FILE", tmp_path / "state" / "suwgit" / "api_key")
+    monkeypatch.setattr(paths, "TENANTS_FILE", tmp_path / "state" / "suwgit" / "tenants.json")
+    monkeypatch.setattr(paths, "LAST_B2B_FILE", tmp_path / "state" / "suwgit" / "last-b2b.json")
     monkeypatch.setattr(paths, "BIN_DIR", tmp_path / "bin")
     monkeypatch.setattr(paths, "BASH_SHIM", tmp_path / "bin" / "suwgit")
     monkeypatch.setattr(paths, "CMD_SHIM", tmp_path / "bin" / "suwgit.cmd")

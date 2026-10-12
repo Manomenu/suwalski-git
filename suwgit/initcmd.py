@@ -1,14 +1,15 @@
 """`suwgit init` — the interactive setup behind `just install`.
 
-Asks for the vLLM endpoint, how often to sweep, whether the schedule is on and
-whether to push; then puts suwgit on PATH and registers the scheduled task.
+Asks for the vLLM endpoint, how often to sweep, whether the schedule is on,
+whether to push and whose name goes on reports; then puts suwgit on PATH and
+registers the scheduled task.
 Re-runnable: every prompt offers the current value as default.
 """
 
 from __future__ import annotations
 
 from . import config as config_module
-from . import install, paths
+from . import gitops, install, paths
 from .config import DEFAULT_INTERVAL_HOURS, Config
 
 BOLD = "\033[1m"
@@ -68,6 +69,13 @@ def run() -> int:
     scheduled = _ask_yes_no("  Sweep on a schedule (Task Scheduler)?", existing.scheduled)
     push = _ask_yes_no("  Push the branch after committing?", existing.push)
 
+    print(f"\n{BOLD}Reports{RESET}")
+    report_author = _ask(
+        "  Your name on reports (Prepared by)",
+        existing.report_author or gitops.global_user_name(),
+        allow_empty=True,
+    )
+
     config = Config(
         llm=config_module.LlmConfig(
             base_url=base_url.rstrip("/"),
@@ -79,6 +87,7 @@ def run() -> int:
         scheduled=scheduled,
         push=push,
         max_diff_chars=existing.max_diff_chars,
+        report_author=report_author,
         repos=existing.repos,
     )
     target = config_module.save(config)

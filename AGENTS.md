@@ -29,6 +29,7 @@ many words, and it covers that task only.
 | --- | --- |
 | `suwgit/committer.py`, `gitops.py`, `llm.py`, `repolog.py`, `config.py` | the tool itself: what to commit, how to name it — mostly identical to upstream |
 | `suwgit/sweep.py` | one pass over the registry — what the scheduled task runs |
+| `suwgit/b2b.py`, `report.py`, `tenants.py` | B2B commits as a record of client work, and `suwgit report` — platform-independent, kept identical to upstream |
 | `suwgit/install.py`, `initcmd.py`, `uninstall.py` | launchers in `~/.local/bin` and the Task Scheduler entry |
 | `suwgit/locking.py`, `logs.py`, `paths.py` | the Windows platform layer: `msvcrt` locks, the capped log, file locations |
 | `bin/suwgit.py` | the entry point every launcher and the task run; `bin/suwgit` runs it from the clone |

@@ -46,7 +46,7 @@ def test_the_verdict_is_read_off_the_answer():
 
 def test_a_flagged_change_is_not_committed(sandbox, tmp_path, monkeypatch):
     repo = _repo(tmp_path / "repo")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: parse_structured(UNSAFE))
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree, **_: parse_structured(UNSAFE))
 
     result = committer.commit_repo(_config(), repo)
 
@@ -61,7 +61,7 @@ def test_a_flagged_change_is_never_pushed(sandbox, tmp_path, monkeypatch):
     repo = _repo(tmp_path / "repo")
     gitops.commit_all(repo, "[chore] init")
     (repo / "deploy.env").write_text("AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY2\n")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: parse_structured(UNSAFE))
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree, **_: parse_structured(UNSAFE))
 
     result = committer.commit_repo(_config(push=True), repo)
 
@@ -73,7 +73,7 @@ def test_the_refusal_is_logged_as_a_warning(sandbox, tmp_path, monkeypatch):
     from suwgit import paths
 
     repo = _repo(tmp_path / "repo")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: parse_structured(UNSAFE))
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree, **_: parse_structured(UNSAFE))
 
     committer.commit_repo(_config(), repo)
 
@@ -86,7 +86,7 @@ def test_the_refusal_is_logged_as_a_warning(sandbox, tmp_path, monkeypatch):
 def test_a_missing_reason_still_refuses(sandbox, tmp_path, monkeypatch):
     """A verdict with no explanation is still a verdict."""
     repo = _repo(tmp_path / "repo")
-    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree: Suggestion("[chore] x", unsafe=True))
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree, **_: Suggestion("[chore] x", unsafe=True))
 
     result = committer.commit_repo(_config(), repo)
 

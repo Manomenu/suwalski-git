@@ -38,11 +38,15 @@ def run() -> tuple[int, int, int]:
 
     committed = pushed = deferred = 0
     for entry in config.repos:
-        root = Path(entry)
+        if not entry.auto_commit:
+            continue  # registered for reports only; committed by hand
+        root = Path(entry.path)
         if not (root / ".git").exists():
             log.warning("%s: registered but no longer a git repository, skipping", root)
             continue
-        result = commit_repo(config, root, quiet_seconds=config.quiet_seconds)
+        # A repository with a default tenant is client work: its sweeps commit
+        # as `suwgit commit --b2b` would, so nothing done there goes unrecorded.
+        result = commit_repo(config, root, quiet_seconds=config.quiet_seconds, tenant=entry.default_tenant, project=entry.default_project)
         committed += bool(result.committed)
         pushed += bool(result.pushed)
         deferred += bool(result.deferred)

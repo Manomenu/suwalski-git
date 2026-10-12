@@ -7,10 +7,12 @@ logs only), so both make exactly the same decisions about what is committable.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import gitops, repolog
+from . import b2b as b2b_format
+from . import gitops, repolog, tenants
 from .config import Config
 from .llm import LlmUnavailable, suggest_commit_message
 from .locking import Busy, repo_lock
@@ -30,7 +32,15 @@ class Result:
     deferred: bool = False  # left alone because the files are still being edited
 
 
-def commit_repo(config: Config, root: Path, push: bool | None = None, quiet_seconds: float = 0.0, prefix: str = "") -> Result:
+def commit_repo(
+    config: Config,
+    root: Path,
+    push: bool | None = None,
+    quiet_seconds: float = 0.0,
+    prefix: str = "",
+    tenant: str = "",
+    project: str = "",
+) -> Result:
     """Commit everything in `root` under an LLM-written message, then push it.
 
     A clean tree is not the end of the story: commits you made by hand, or ones
@@ -59,9 +69,16 @@ def commit_repo(config: Config, root: Path, push: bool | None = None, quiet_seco
     to copy a string it might mangle.
     A failed push never undoes the commit: the work is safe locally either way,
     and the next sweep pushes it along with whatever comes next.
+
+    A `tenant` makes the commit a B2B one: it records its work scope,
+    project, tenant and work period under the title (see `b2b.py`), and the
+    repository goes into the tenant index `suwgit report` searches. `project`
+    defaults to the folder name. `suwgit commit` and `push` pass these for
+    `--b2b`; a sweep passes the repository's defaults.
     """
     log = logger()
     should_push = config.push if push is None else push
+    project_name = project or root.name
 
     try:
         with repo_lock(root):
@@ -83,7 +100,7 @@ def commit_repo(config: Config, root: Path, push: bool | None = None, quiet_seco
                     )
                     return Result(root, False, "changes are still warm", deferred=True)
 
-                suggestion = suggest_commit_message(config.llm, tree)
+                suggestion = suggest_commit_message(config.llm, tree, b2b=bool(tenant))
 
                 if suggestion.unsafe:
                     # Refusing is the whole point: a secret in a git history is
@@ -94,9 +111,19 @@ def commit_repo(config: Config, root: Path, push: bool | None = None, quiet_seco
                     repolog.record_blocker(root, f"refused to commit — possible secret in the changes: {reason}")
                     return Result(root, False, f"possible secret in the changes: {reason}", unsafe=True)
 
-                message = f"{prefix} {suggestion.message}" if prefix else suggestion.message
+                title = f"{prefix} {suggestion.message}" if prefix else suggestion.message
+                message = title
+                if tenant:
+                    start, end = b2b_format.work_period(gitops.change_times(root, tree.status), time.time())
+                    message = b2b_format.compose(title, suggestion.summary, suggestion.work_scope, project_name, tenant, start, end)
                 commit = gitops.commit_all(root, message)
-                log.info("%s: committed %s %s", root, commit, message)
+                if tenant:
+                    try:
+                        tenants.record(tenant, root)
+                    except OSError as exc:
+                        # The commit is the record; the index only speeds up finding it.
+                        log.warning("%s: committed, but could not note it in the tenant index (%s)", root, exc)
+                log.info("%s: committed %s %s", root, commit, title)
                 repolog.clear(root)
                 result = Result(root, True, "committed", message=message, commit=commit)
             else:

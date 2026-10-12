@@ -28,6 +28,12 @@ LOG_FILE = STATE_DIR / "suwgit.log"
 LOCK_DIR = STATE_DIR / "locks"
 # The vLLM key never goes into the config file — it stays here, in the profile.
 API_KEY_FILE = STATE_DIR / "api_key"
+# Which repositories ever got a B2B commit for which tenant, so a report knows
+# where to look. An index only: the commits themselves are the record.
+TENANTS_FILE = STATE_DIR / "tenants.json"
+# The tenant and project of the last `--b2b` commit made by hand, per repository,
+# so a bare `--b2b` there can offer them again.
+LAST_B2B_FILE = STATE_DIR / "last-b2b.json"
 
 # Two launchers, because Windows has two kinds of shell: Git Bash runs the
 # extensionless script, cmd and PowerShell pick up the .cmd. Symlinks would need

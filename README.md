@@ -1,27 +1,123 @@
 # suwgit for Windows
 
-**Your working tree, committed for you, under a name a local LLM wrote.**
+**Your work, committed for you, and a report for your client.**
 
-A Windows port of [suwalski-git](https://github.com/Manomenu/suwalski-git):
-the same tool, run by the **Task Scheduler** instead of systemd, used from
+A Windows port of [suwalski-git](https://github.com/Manomenu/suwalski-git): the
+same tool, run by the **Task Scheduler** instead of systemd, used from
 **Git Bash**, cmd or PowerShell alike.
 
-Register a repository and forget about it. Every 1.5 hours a scheduled sweep
-looks at whatever you have left uncommitted, and — as long as you have stopped
-touching it — asks your own vLLM server what happened, and commits it:
+suwgit watches your git repositories and commits what you leave uncommitted,
+under a clear message written by an AI model running on **your own server**.
+No code leaves your network.
+
+Working B2B? The same commits become a record of the work you did for a client,
+in plain language a non-technical client understands, and one command turns
+them into a PDF report.
 
 ```
 [feature] added revenue chart to main page dashboard
 [refactor,bugfix] added builder schema for report creator and fixed main tab not opening
-[feature,refactor,bugfix] added csv export for revenue chart and removed broken tabs module
 ```
 
-No API keys to a cloud provider, no code leaving your network — it talks to a
-vLLM server you run. Pushing is opt-in: leave it off and the commits sit in your
-local history until you decide what to do with them.
+## What you get
 
-Or skip the waiting and commit right now, from anywhere inside the repository —
-with a ticket id in front, if you work against a tracker:
+- **Nothing left uncommitted.** Register a repository and forget it. Every
+  interval a scheduled sweep commits whatever you have stopped working on. It
+  waits while you are still editing.
+- **Messages worth reading.** Each commit says what changed, labelled `feature`,
+  `bugfix`, `refactor` and so on, so you can find anything later.
+- **Ticket ids where your team needs them.** Put a YouTrack or Jira task id in
+  front of the commit title with one flag.
+- **Proof of work for clients.** Mark a commit as client work and it records
+  what was done, for which project and when, written for the client rather
+  than for developers.
+- **A PDF report in one command.** Every piece of work for a client over any
+  date range, grouped by project. No spreadsheet, no time tracker, no database.
+- **Safe by default.** It refuses to commit anything that looks like a password
+  or an API key. It never force-pushes and never pulls on your behalf. Pushing
+  is off until you turn it on.
+
+## The report
+
+```bash
+suwgit report --tenant lokum
+```
+
+![The first page of an example work report](docs/report-example.png)
+
+Each entry shows when the work was done, a short summary, the work behind it,
+and the commit that proves it. By default the report covers the last 30 days
+and shows days only:
+
+| option | what it does |
+|---|---|
+| `--from 2026-09-13 --to 2026-10-13` | any range, both days included; dates as `YYYY-MM-DD` |
+| `--time` | add the hours of every piece of work |
+| `-o ~/invoices/` | where to save it: a file or a folder (default: the current folder, as `lokum--<today>.pdf`) |
+| `--format json` | print the report as JSON instead, for scripts: `suwgit report --tenant lokum --format json \| jq` |
+
+The report lists only your own commits, from every repository where you did
+work for that client, on every branch.
+
+## Recording work for a client
+
+A client gets a **tenant**: a short working name only you see, such as `lokum`.
+Commit with it:
+
+```bash
+suwgit commit --b2b lokum --project "Lokum Shop"
+```
+
+```
+[feature] added order checkout flow
+
+Summary: Customers can now pay for their order directly in the shop, and orders with a wrong total are stopped before payment.
+
+Work-Scope:
+- added a checkout page where customers enter their address and pay
+- made the shop double-check the order total before taking payment
+
+Project: Lokum Shop
+Tenant: lokum
+Work-Period: 2026-10-12T09:14+02:00/2026-10-12T11:04+02:00
+```
+
+The title stays technical, for you. The **Summary** and **Work-Scope** are for
+the client: what changed for them, in plain words. **Project** is the name the
+client sees, and the folder name if you give none. The tenant never appears in
+the report.
+
+### Less typing
+
+Tell a repository who it works for, once:
+
+```bash
+suwgit register ~/projects/shop --default-b2b lokum --default-project "Lokum Shop"
+```
+
+| in that repository | commits as |
+|---|---|
+| `suwgit commit` | an ordinary commit |
+| `suwgit commit --b2b` | client work for `lokum`, project Lokum Shop |
+| `suwgit push --b2b acme` | client work for `acme` instead |
+| a scheduled sweep | client work for `lokum`, every time |
+
+Without a default, a bare `--b2b` offers what you used last time in that
+repository and asks first. Enter confirms, and `-y` skips the question:
+
+```console
+$ suwgit push --b2b
+Commit and push shop as B2B for lokum, project Lokum Shop (last used here)? [Y/n]
+```
+
+If a repository mixes client work with your own, register it with
+`--no-auto-commit` and commit by hand. Then only what you mark with `--b2b`
+counts as the client's.
+
+## Ticket ids in commit titles
+
+If your team requires every commit to name its task from YouTrack, Jira or
+another tracker, add it with `-p` / `--prefix`:
 
 ```console
 $ suwgit push -p EH-3311111
@@ -30,230 +126,88 @@ $ suwgit push -p EH-3311111
   pushed master
 ```
 
-## Why
-
-Uncommitted work is invisible work. It does not survive a bad rebase, it cannot
-be bisected, and "wip" tells you nothing six weeks later. suwgit turns the pile
-of changes you have not gotten around to committing into a readable history,
-without asking you to stop what you are doing.
-
-## Why not WSL
-
-It would work, but clumsily: git on `/mnt/c` goes through WSL's file bridge and
-is slow on a big repository; WSL's git has its own config, credentials and line
-ending settings beside the Windows ones; and a cron job inside WSL only runs
-while the WSL VM happens to be up. Native Windows Python, Git for Windows and the
-Task Scheduler need none of that.
-
-## Requirements
-
-- Windows 10/11 with [Git for Windows](https://gitforwindows.org/) (Git Bash)
-- Python 3.12+ — **no dependencies**, standard library only (the Microsoft Store
-  build is fine)
-- [`just`](https://github.com/casey/just) — every setup step is a recipe
-- A [vLLM](https://github.com/vllm-project/vllm) server, or anything else that
-  speaks the OpenAI `/chat/completions` dialect
-- For development only: [`uv`](https://docs.astral.sh/uv/), and `shellcheck` for the full gate
+The id goes in front of the title exactly as you typed it. The AI model never
+sees it, so it cannot get it wrong. The tracker links the commit to the task as
+usual. It works together with `--b2b`, and scheduled sweeps add no prefix.
 
 ## Install
+
+You need Windows 10/11 with [Git for Windows](https://gitforwindows.org/),
+Python 3.12+ (the Microsoft Store build is fine), and a
+[vLLM](https://github.com/vllm-project/vllm) server or anything else that
+speaks the OpenAI chat-completions API. There is nothing else to install.
+
+In Git Bash:
 
 ```bash
 git clone <this repo> ~/Repos/suwalski-git-win
 cd ~/Repos/suwalski-git-win
-just install
+./bin/suwgit init
 ```
 
-`just install` asks for your server's URL and model, how often to sweep, whether
-the schedule is on and whether to push. It then writes two launchers into
-`~/.local/bin` (`suwgit` for Git Bash, `suwgit.cmd` for cmd and PowerShell) and
-registers a Task Scheduler entry named `suwgit`. Open a new terminal, then:
+`init` asks for your server, how often to commit, whether to push, and
+your name for reports ("Prepared by"). It then puts `suwgit` on your PATH for
+Git Bash, cmd and PowerShell, and adds a Task Scheduler entry named `suwgit`.
+Run it again any time: every question offers your current answer, so Enter
+keeps it. Open a new terminal, then:
 
 ```bash
 suwgit register ~/projects/dashboard
 suwgit list
 ```
 
-`just install` is re-runnable — every prompt offers your current setting as its
-default, and the task is replaced, not duplicated. Re-run it after changing the
-interval, or after reinstalling Python: the launchers and the task carry the
-path of the interpreter that ran the install.
-
-## just recipes
-
-| recipe | what it does |
-|---|---|
-| `just install` | interactive setup: config, launchers on PATH, scheduled task |
-| `just uninstall [--purge]` | remove the launchers, the task and the logs; **keeps your config** unless `--purge` |
-| `just task` | everything Windows knows about the task: state, last result, next run |
-| `just task-run` | start a sweep through the scheduler now — the real, windowless path |
-| `just check` | the quality gate: ruff, pytest, shellcheck, lockfile |
-| `just fmt` / `just sync` | ruff autofix and format / dev dependencies |
-
 ## Commands
 
 | command | what it does |
 |---|---|
-| `suwgit register <folder>` | watch a repository (it must have a git remote) |
+| `suwgit register <folder>` | watch a repository; run again to change its settings: `--default-b2b <tenant>`, `--default-project <name>`, `--no-auto-commit` |
 | `suwgit unregister <folder>` | stop watching it |
-| `suwgit list` | config, task state, and which repositories are dirty |
-| `suwgit commit [path] [-p PREFIX]` | commit the closest repository above `path` now, and print the message (`--push` / `--no-push` override the config for one run) |
-| `suwgit push [path] [-p PREFIX]` | the same thing with the push forced on |
-| `suwgit logs [-n N] [-f]` | the sweep log, through [`bat`](https://github.com/sharkdp/bat) if you have it |
-| `suwgit sweep` | one pass over every registered repository — what the scheduled task runs |
-| `suwgit init` / `suwgit uninstall` | what `just install` / `just uninstall` call |
+| `suwgit list` | the setup, every repository and whether it has changes, and every client as `tenant, folder (project)` |
+| `suwgit commit [path]` | commit now; `-p <ticket>` for a task id, `--b2b [tenant]` / `--project [name]` for client work, `-y` to skip the question, `--push` / `--no-push` |
+| `suwgit push [path]` | commit now and push |
+| `suwgit report --tenant <tenant>` | the PDF report; see [above](#the-report) |
+| `suwgit logs [-n N] [-f]` | what the scheduled sweeps did |
+| `suwgit sweep` | one pass over every repository, as the scheduled task does |
+| `suwgit init` | set up, or change the setup; safe to run again |
+| `suwgit uninstall [--purge]` | remove suwgit; your config stays unless `--purge` |
 
-`-p` / `--prefix` puts its argument in front of the model's message, as given:
-`suwgit push -p EH-3311111` commits `EH-3311111 [feature] example`. The model
-never sees the prefix, so it cannot mangle it. Scheduled sweeps add none.
+The scheduled task, from Git Bash:
 
-## Good messages, not chatter
-
-The model is held to a fixed answer shape, so you get a commit message and
-nothing else — no "Sure, here you go!", no stray formatting, no essay. It also
-cannot invent its own labels: categories come from one fixed list, so
-`git log --grep '\[bugfix'` keeps working months later.
-
-```
-feature   bugfix   refactor   docs   test   chore
-style     perf     build      config remove
+```bash
+MSYS_NO_PATHCONV=1 schtasks /Query /TN suwgit /V /FO LIST   # its state, last result, next run
+MSYS_NO_PATHCONV=1 schtasks /Run /TN suwgit                 # run a sweep through it now
 ```
 
-## It stops before committing a secret
+### With `just`
 
-Every time it looks at your changes, the model is also asked whether they are
-safe to commit at all. If it spots an API key, an access token, a password, a
-private key or a filled-in `.env`, **nothing is committed and nothing is
-pushed** — the changes stay in your working tree and the reason goes to the log:
+If you have [`just`](https://github.com/casey/just), the same steps are
+recipes in the clone:
 
-```
-WARNING  ~/projects/api: REFUSED to commit — possible secret in the changes
-         (secrets/prod.env contains a real OpenAI API key in the added lines)
-```
-
-A secret in a git history is not undone by a later commit, and a sweep
-commits while you are not watching, so this is the one moment anything can stop
-it. Placeholders, `.env.example` files and variables merely *named* `api_key`
-are left alone.
-
-Treat it as a safety net, not a guarantee: it is a language model's judgement,
-so it will not catch everything. Keep your `.gitignore` honest.
-
-## Configuration
-
-`~/.config/suwgit/config.json`:
-
-```json
-{
-  "llm": {
-    "base_url": "http://localhost:8000/v1",
-    "model": "qwen3-8b",
-    "api_key": "",
-    "timeout_seconds": 180
-  },
-  "interval_hours": 1.5,
-  "scheduled": true,
-  "push": false,
-  "max_diff_chars": 400000,
-  "repos": []
-}
-```
-
-| key | meaning |
+| recipe | runs |
 |---|---|
-| `base_url` | your server's address, written exactly as it works — suwgit uses it as given and adds nothing, so if it needs `/v1` on the end, put it there |
-| `model` | the model name your server reports |
-| `api_key` | can stay empty for a local server that does not check one |
-| `interval_hours` | how often to look; hours only, rounded to whole minutes — re-run `just install` after changing it |
-| `scheduled` | whether the task runs at all; off keeps it registered but disabled |
-| `push` | push after each commit, sweeps included; off by default |
-| `max_diff_chars` | how much of the diff the model reads |
+| `just install` | `./bin/suwgit init` |
+| `just uninstall [--purge]` | `./bin/suwgit uninstall` |
+| `just task` / `just task-run` | the two `schtasks` lines above |
+| `just check` | `scripts/.internal/check.sh`, the quality gate for development |
 
-The default `max_diff_chars` sends the whole diff in almost every case. Lower it
-if your model has a small context window, or if you would rather it read less
-and answer faster. When a diff is too big it gets trimmed, but the list of
-changed files is always sent, so the message still covers everything that moved.
+## When something goes wrong
 
-## Where things live
+If suwgit cannot commit a repository, because the AI server is down, a secret
+was spotted or the push was rejected, it leaves a `.suwgit.log` note in that
+repository saying why. The note disappears as soon as the problem is gone. A
+secret is never committed: the changes stay in your working tree for you to
+check.
 
-| what | where |
-|---|---|
-| config | `~/.config/suwgit/config.json` (that is `%USERPROFILE%\.config\suwgit`) |
-| API key | `~/.local/state/suwgit/api_key` — **never** in the config file |
-| log | `~/.local/state/suwgit/suwgit.log`, one file, hard-capped at 5 MB |
-| locks | `~/.local/state/suwgit/locks/` |
-| blocker notes | `.suwgit.log` in the repository itself — see below |
-| launchers | `~/.local/bin/suwgit`, `~/.local/bin/suwgit.cmd` |
-| schedule | Task Scheduler → Task Scheduler Library → `suwgit` |
+If a git hook in your repository needs a tool, that tool must be on the
+**Windows** user PATH, not only in `~/.bashrc`: a scheduled task never sees
+Git Bash's PATH.
 
-Deliberately not `%APPDATA%`: the Microsoft Store build of Python redirects
-writes there into its own package folder, so the config you open in an editor
-would not be the one suwgit reads.
+## More
 
-The task runs as you, only while you are logged in (no stored password), under
-`pythonw.exe`, with every git call windowless — a sweep never flashes a console.
-A sweep missed while the machine was asleep runs as soon as it wakes. Git hooks
-in your repositories run as usual; a tool they need must be on the **Windows**
-user PATH, not only in `~/.bashrc`, because a scheduled task never sees Git
-Bash's PATH.
-
-## When it cannot commit
-
-A background job that fails silently is one you stop trusting. So when something
-really blocks a repository — the model is unreachable, a suspected secret is in
-the changes, the push is rejected — suwgit leaves a note **in that repository**,
-as `.suwgit.log`:
-
-```
-# .suwgit.log — why suwgit did not commit this repository. Newest last, at most 10 entries.
-2026-09-11 08:25:12  LLM unavailable, changes left uncommitted: cannot reach http://vllm:8000  (×6)
-2026-09-11 14:10:03  refused to commit — possible secret in the changes: deploy/prod.env holds an API key
-```
-
-You notice a project has not been committed for days while you are standing in
-it, not while reading a central log — so the answer is kept where the question
-gets asked. The last ten blockers are kept; a blocker that keeps repeating is
-counted rather than repeated, so one server outage cannot push out the other
-nine things that went wrong. The first note also adds `.suwgit.log` to the
-repository's `.gitignore`, creating that file if there is none — one ignored
-line is a smaller price than a blocker nobody hears about.
-
-**The file is deleted the moment there is nothing left to do** — whether suwgit
-committed and pushed, or you did it by hand. So if it is there, something is
-wrong right now; if it is not, nothing is.
-
-Waiting is not blocking: nothing is written when suwgit is simply giving you
-time to finish editing.
-
-## What it deliberately does not do
-
-- **It does not push unless you say so.** `push` is `false` by default:
-  committing for you is one thing, publishing on your behalf is another. With it
-  on, the current branch is pushed after every commit — scheduled sweeps included —
-  and a branch with no upstream gets one, so a commit a sweep made on a new
-  branch does not sit there invisibly. A sweep also pushes a repository that has
-  **nothing to commit but something unpushed**, so commits you made by hand, and
-  ones whose push failed earlier, still go out.
-- **It never forces, and never pulls.** If the remote has moved on, the push is
-  rejected and that is where it stops: no `--force`, no automatic pull or
-  rebase, because a rebase conflict in an unattended sweep is how work gets
-  lost. The commit is safe locally and goes out with the next sweep, once you
-  have sorted the divergence yourself.
-- **It stays quiet.** A scheduled sweep never writes to a terminal. An unreachable
-  server is a `WARNING` in the log and nothing else; your changes are left
-  uncommitted and picked up on the next sweep.
-- **It does not retry.** A failed sweep is not worth hammering a busy GPU for —
-  the changes will still be there in 1.5 hours.
-- **It does not commit while you are still working.** A sweep leaves a
-  repository alone if any uncommitted file was touched in the last three
-  quarters of the interval — 67 minutes at the default 1.5 hours. Committing
-  mid-edit gives you half a refactor under a message written about work that is
-  not done yet. Nothing is lost by waiting: the next sweep sees the same changes
-  plus whatever you added. `suwgit commit` by hand ignores this entirely —
-  asking for a commit is the statement that you are finished.
-- **It never commits into a mess.** A repository in the middle of a merge,
-  rebase, cherry-pick or bisect is left alone until you have finished. A
-  scheduled sweep and a manual `suwgit commit` can never collide over the same
-  repository.
+- [How it works](docs/how-it-works.md): the commit flow, the AI model's
+  instructions, the B2B commit format, how the report is built, the scheduled
+  task, why not WSL, configuration reference and file locations.
+- [TODO](TODO.md): what is planned next.
 
 ## License
 
