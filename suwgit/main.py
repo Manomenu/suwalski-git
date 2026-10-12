@@ -12,7 +12,7 @@ import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from . import b2b, gitops, initcmd, install, logs, paths, report, sweep, tenants, uninstall
+from . import b2b, gitops, initcmd, install, logs, mailer, paths, report, sweep, tenants, uninstall
 from . import config as config_module
 from .committer import commit_repo
 from .llm import LlmUnavailable, summarize_project
@@ -205,14 +205,16 @@ def _b2b_for(entry: config_module.RepoEntry | None, root: Path, args: argparse.N
     return tenant, project, from_last
 
 
-def _confirm(question: str) -> bool:
-    """A yes/no question where Enter means yes. No answer at all (no terminal) means no."""
+def _confirm(question: str, default: bool = True) -> bool:
+    """A yes/no question; Enter takes `default`. No answer at all (no terminal) means no."""
     try:
-        answer = input(f"{question} [Y/n] ").strip().lower()
+        answer = input(f"{question} {'[Y/n]' if default else '[y/N]'} ").strip().lower()
     except EOFError:
         print()
         return False
-    return answer in ("", "y", "yes", "t", "tak")
+    if not answer:
+        return default
+    return answer in ("y", "yes", "t", "tak")
 
 
 def cmd_commit(args: argparse.Namespace) -> int:
@@ -332,6 +334,22 @@ def cmd_report(args: argparse.Namespace) -> int:
     if first > last:
         return _fail(f"--from {first} is after --to {last}")
 
+    # Sending is checked before anything is built: a report that cannot go out
+    # should say so at once, not after the model has summarised every project.
+    mail_config = None
+    if args.mail:
+        if args.format == "json":
+            return _fail("--mail sends the PDF — leave out --format json")
+        try:
+            mail_config = config_module.load().mail
+        except config_module.ConfigError as exc:
+            return _fail(str(exc))
+        if not mail_config.is_configured:
+            return _fail(mailer.not_set_up())
+        bad = [address for address in args.mail if not mailer.looks_like_address(address)]
+        if bad:
+            return _fail(f"not an e-mail address: {', '.join(bad)}")
+
     repos = tenants.repos_of(args.tenant)
     if not repos:
         return _fail(f"no repository has ever had a B2B commit for {args.tenant} (index: {paths.TENANTS_FILE})")
@@ -377,6 +395,23 @@ def cmd_report(args: argparse.Namespace) -> int:
     projects = sorted({e.project for e in entries})
     print(f"{GREEN}✓{RESET} {BOLD}{target}{RESET}")
     print(f"  {DIM}{len(entries)} commit(s) for {args.tenant}, {first} – {last}: {', '.join(projects)}{RESET}")
+
+    if mail_config is not None:
+        recipients = ", ".join(args.mail)
+        if not args.yes:
+            # The report is on disk now: open it before it goes to a client.
+            # Enter is no, so a stray key never sends anything.
+            print(f"\n  {BOLD}Look at the report first:{RESET} {target}")
+            if not _confirm(f"  Send it to {BOLD}{recipients}{RESET} from {mail_config.sender}?", default=False):
+                print(f"{DIM}not sent — the report stays at {target}; -y sends without asking{RESET}")
+                return 0
+        subject, body = mailer.report_text(f"{first:%Y-%m-%d} – {last:%Y-%m-%d}", _report_author())
+        message = mailer.build(mail_config, args.mail, subject, body, target.read_bytes(), target.name)
+        try:
+            mailer.send(mail_config, message)
+        except mailer.MailError as exc:
+            return _fail(f"the report is at {target}, but it was not sent: {exc}")
+        print(f"{GREEN}✓{RESET} sent to {recipients}  {DIM}from {mail_config.sender}{RESET}")
     return 0
 
 
@@ -465,6 +500,7 @@ examples:
   suwgit report --tenant lokum --from 2026-09-01 --to 2026-09-30 -o ~/invoices/
   suwgit report --tenant lokum --time                   with the hours of every work period
   suwgit report --tenant lokum --format json | jq '.projects[].name'
+  suwgit report --tenant lokum --mail client@example.com   PDF, then asks before e-mailing it
 
 see the tenants you have, and their repositories and projects:  suwgit list"""
 
@@ -559,6 +595,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="pdf",
         help="pdf writes a file (default); json prints the report to stdout, for jq",
     )
+    report_cmd.add_argument(
+        "--mail",
+        action="append",
+        metavar="ADDRESS",
+        help="also send the PDF to this address, from the mailbox set up in `suwgit init`; repeat for more. "
+        "Asks [y/N] once the PDF is made, so you can look at it first",
+    )
+    report_cmd.add_argument("-y", "--yes", action="store_true", help="with --mail: send without asking")
     report_cmd.add_argument(
         "-o",
         "--output",

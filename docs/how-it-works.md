@@ -252,6 +252,22 @@ offset. An empty range is an empty `projects` list, not an error.
 }
 ```
 
+`--mail <address>` (repeatable) sends the PDF to that address, over SMTP from
+the standard library, from the mailbox `init` set up: `starttls` (587), `ssl`
+(465) or `none` for a relay on a trusted network.
+
+- **The mail is always the same.** Subject and body come from a fixed template
+  in `mailer.py`; only the period and the Prepared by name change. Nothing a
+  model wrote is in the mail — that is in the PDF.
+- **Nothing goes out without a yes.** The PDF is written first and its path
+  shown, so it can be opened; then `Send it to <address> from <sender>? [y/N]`.
+  Enter is no, so a stray key sends nothing, and with no terminal to answer
+  (a script, Claude) the answer is no too. `-y` sends without asking.
+- **It stops early when it cannot send:** without a mailbox, with
+  `--format json`, or with something that is not an address, before anything
+  is built. When sending fails, the PDF is still there and the error says why
+  (a refused login hints at app passwords, which Gmail and Outlook require).
+
 The tenant name is never printed in the PDF — it is the user's working name for
 the client — only in the default file name, `<tenant>--<today>.pdf`.
 
@@ -302,6 +318,7 @@ writes nothing.
   "push": false,
   "max_diff_chars": 400000,
   "report_author": "Piotr Gugnowski",
+  "mail": {"host": "smtp.gmail.com", "port": 587, "security": "starttls", "username": "you@gmail.com", "password": "", "sender": "you@gmail.com"},
   "repos": [
     {"path": "/home/you/projects/shop", "auto_commit": true, "default_tenant": "lokum", "default_project": "Lokum Shop"}
   ]
@@ -319,6 +336,7 @@ writes nothing.
 | `push` | push after each commit, sweeps included |
 | `max_diff_chars` | how much diff the model reads; the default sends the whole diff in almost every case |
 | `report_author` | the "Prepared by" name on reports; empty means the commits' author names |
+| `mail` | the optional mailbox for `report --mail`; `init` sets it. The password is never stored here (see below) |
 | `repos` | the registry, written by `register`. A bare path, as older versions wrote it, still loads |
 
 
@@ -328,6 +346,7 @@ writes nothing.
 |---|---|
 | config | `~/.config/suwgit/config.json` (that is `%USERPROFILE%\.config\suwgit`) |
 | API key | `~/.local/state/suwgit/api_key` — never in the config file |
+| mail password | `~/.local/state/suwgit/mail_password` — never in the config file |
 | log | `~/.local/state/suwgit/suwgit.log`, hard-capped at 5 MB |
 | locks | `~/.local/state/suwgit/locks/` |
 | tenant index | `~/.local/state/suwgit/tenants.json` — kept by `uninstall`, removed by `--purge` |

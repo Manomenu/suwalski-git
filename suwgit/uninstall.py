@@ -29,7 +29,7 @@ def runtime_targets() -> list[Path]:
 
 def config_targets() -> list[Path]:
     """What you configured: the config itself and the API key. Only on --purge."""
-    candidates = (paths.CONFIG_FILE, paths.API_KEY_FILE, paths.CONFIG_DIR, paths.STATE_DIR)
+    candidates = (paths.CONFIG_FILE, paths.API_KEY_FILE, paths.MAIL_PASSWORD_FILE, paths.CONFIG_DIR, paths.STATE_DIR)
     return [path for path in candidates if path.exists()]
 
 

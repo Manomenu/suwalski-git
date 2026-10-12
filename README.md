@@ -58,6 +58,7 @@ and shows days only:
 | `--no-summary` | leave out the project summaries: faster, and works without the AI server |
 | `--hide-reverted` | leave out work a later revert undid |
 | `-o ~/invoices/` | where to save it: a file or a folder (default: the current folder, as `lokum--<today>.pdf`) |
+| `--mail client@example.com` | send the PDF to this address, from your own mailbox (set up in `init`); repeat for more people. It asks `[y/N]` once the PDF is made, so you can look at it first; `-y` sends without asking |
 | `--format json` | print the report as JSON instead, for scripts: `suwgit report --tenant lokum --format json \| jq` |
 
 The report lists only your own commits, from every repository where you did
@@ -154,7 +155,8 @@ cd ~/Repos/suwalski-git
 ```
 
 `init` asks for your server, how often to commit, whether to push, and
-your name for reports ("Prepared by"). It then puts `suwgit` on your PATH for
+your name for reports ("Prepared by"), and, if you want reports sent by e-mail,
+your mailbox's SMTP settings. It then puts `suwgit` on your PATH for
 Git Bash, cmd and PowerShell, and adds a Task Scheduler entry named `suwgit`.
 Run it again any time: every question offers your current answer, so Enter
 keeps it. Open a new terminal, then:

@@ -8,6 +8,8 @@ Re-runnable: every prompt offers the current value as default.
 
 from __future__ import annotations
 
+import getpass
+
 from . import config as config_module
 from . import gitops, install, paths
 from .config import DEFAULT_INTERVAL_HOURS, Config
@@ -55,6 +57,40 @@ def _ask_yes_no(prompt: str, default: bool) -> bool:
         print(f"  {YELLOW}answer y or n{RESET}")
 
 
+def _ask_secret(prompt: str, existing: str) -> str:
+    """A password, typed without echo; Enter keeps the one already saved."""
+    hint = f" {DIM}[Enter keeps the saved one]{RESET}" if existing else ""
+    return getpass.getpass(f"{prompt}{hint}: ") or existing
+
+
+SECURITY_PORTS = {"starttls": 587, "ssl": 465, "none": 25}
+
+
+def _ask_mail(existing: config_module.MailConfig) -> config_module.MailConfig:
+    """The optional mailbox for `suwgit report --mail`. No means none, and forgets an earlier one."""
+    print(f"\n{BOLD}E-mail{RESET}  {DIM}optional: lets `suwgit report --mail <address>` send the PDF{RESET}")
+    if not _ask_yes_no("  Send reports by e-mail?", existing.is_configured):
+        return config_module.MailConfig()
+
+    host = _ask("  SMTP server (e.g. smtp.gmail.com)", existing.host)
+    while True:
+        security = _ask("  Encryption — starttls, ssl or none", existing.security or "starttls").lower()
+        if security in SECURITY_PORTS:
+            break
+        print(f"  {YELLOW}starttls (port 587), ssl (port 465) or none{RESET}")
+    default_port = existing.port if existing.host and existing.security == security else SECURITY_PORTS[security]
+    while True:
+        try:
+            port = int(_ask("  Port", str(default_port)))
+            break
+        except ValueError:
+            print(f"  {YELLOW}a number, like 587{RESET}")
+    username = _ask("  Login (usually the address; blank if the server needs none)", existing.username, allow_empty=True)
+    password = _ask_secret("  Password — Gmail and Outlook need an app password", existing.password) if username else ""
+    sender = _ask("  Send as (the From address)", existing.sender or (username if "@" in username else ""))
+    return config_module.MailConfig(host=host, port=port, security=security, username=username, password=password, sender=sender)
+
+
 def run() -> int:
     existing = config_module.load_or_default()
 
@@ -75,6 +111,7 @@ def run() -> int:
         existing.report_author or gitops.global_user_name(),
         allow_empty=True,
     )
+    mail = _ask_mail(existing.mail)
 
     config = Config(
         llm=config_module.LlmConfig(
@@ -88,12 +125,17 @@ def run() -> int:
         push=push,
         max_diff_chars=existing.max_diff_chars,
         report_author=report_author,
+        mail=mail,
         repos=existing.repos,
     )
     target = config_module.save(config)
     print(f"\n{GREEN}✓{RESET} config written to {target}")
     if api_key:
         print(f"{GREEN}✓{RESET} API key kept out of the config, in {paths.API_KEY_FILE}")
+    if mail.is_configured:
+        print(f"{GREEN}✓{RESET} reports can be sent from {mail.sender}  {DIM}(suwgit report --tenant <t> --mail <address>){RESET}")
+        if mail.password:
+            print(f"{GREEN}✓{RESET} mail password kept out of the config, in {paths.MAIL_PASSWORD_FILE}")
 
     linked, detail = install.link_into_path()
     print(f"{GREEN}✓{RESET} {detail}" if linked else f"{YELLOW}!{RESET} {detail}")
