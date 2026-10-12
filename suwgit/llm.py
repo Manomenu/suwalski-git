@@ -47,6 +47,8 @@ CATEGORIES = (
 )
 
 MAX_DESCRIPTION_CHARS = 210
+# How many times a commit message is asked for when the answer comes back unusable.
+ANSWER_ATTEMPTS = 2
 MAX_WORK_SCOPE_ITEMS = 8
 MAX_WORK_SCOPE_ITEM_CHARS = 200
 MAX_SUMMARY_CHARS = 300
@@ -192,6 +194,14 @@ class LlmUnavailable(Exception):
     """The server did not answer, or answered with something unusable."""
 
 
+class AnswerUnusable(LlmUnavailable):
+    """The server answered, but not with a usable message: cut off, malformed or incomplete.
+
+    Unlike an unreachable server, worth asking again: the same request usually
+    comes back whole the second time.
+    """
+
+
 class _HttpFailure(Exception):
     """Non-2xx from the server, kept with its status so the caller can react."""
 
@@ -248,6 +258,9 @@ def _content(answer: dict) -> str:
                 f"or keep thinking disabled"
             )
         raise LlmUnavailable("model returned an empty message")
+    if choice.get("finish_reason") == "length":
+        used = (answer.get("usage") or {}).get("completion_tokens", "?")
+        raise AnswerUnusable(f"the model's answer was cut off after {used} tokens")
     return content
 
 
@@ -270,7 +283,7 @@ def build(categories: list[str], description: str) -> str:
 
     description = " ".join(str(description).split()).strip('"').strip("'").rstrip(".")
     if not description:
-        raise LlmUnavailable("model returned a message with no description")
+        raise AnswerUnusable("model returned a message with no description")
     if len(description) > MAX_DESCRIPTION_CHARS:
         cut = description[:MAX_DESCRIPTION_CHARS].rsplit(" ", 1)[0]
         description = (cut or description[:MAX_DESCRIPTION_CHARS]).rstrip(",") + "…"
@@ -306,13 +319,13 @@ def parse_structured(content: str) -> Suggestion:
     text = strip_reasoning(content).strip().strip("`")
     start, end = text.find("{"), text.rfind("}")
     if start == -1 or end == -1:
-        raise LlmUnavailable(f"expected a JSON object, got: {text[:120]}")
+        raise AnswerUnusable(f"expected a JSON object, got: {text[:120]}")
     try:
         payload = json.loads(text[start : end + 1])
     except json.JSONDecodeError as exc:
-        raise LlmUnavailable(f"malformed JSON from the model: {exc}") from None
+        raise AnswerUnusable(f"malformed JSON from the model: {exc}") from None
     if not isinstance(payload, dict):
-        raise LlmUnavailable("model returned JSON that is not an object")
+        raise AnswerUnusable("model returned JSON that is not an object")
 
     categories = payload.get("categories") or []
     if isinstance(categories, str):
@@ -402,17 +415,33 @@ def suggest_commit_message(config: LlmConfig, tree: WorkingTree, b2b: bool = Fal
     no record of work, so an answer that lacks one raises instead of falling
     back to a bare title.
     """
+    # A server now and then hands back an answer cut off mid-way, or JSON that
+    # does not parse. Asking once more is cheap next to a sweep left uncommitted.
+    for attempt in range(ANSWER_ATTEMPTS):
+        try:
+            return _suggest_once(config, tree, b2b)
+        except AnswerUnusable as exc:
+            if attempt + 1 == ANSWER_ATTEMPTS:
+                raise AnswerUnusable(f"{exc} (asked {ANSWER_ATTEMPTS} times)") from None
+    raise AssertionError("unreachable")
+
+
+def _suggest_once(config: LlmConfig, tree: WorkingTree, b2b: bool) -> Suggestion:
     content = _complete(config, B2B_PROMPT if b2b else SYSTEM_PROMPT, _user_prompt(tree), B2B_RESPONSE_SCHEMA if b2b else RESPONSE_SCHEMA)
 
     if b2b:
         suggestion = parse_structured(content)
         if not suggestion.work_scope or not suggestion.summary:
-            raise LlmUnavailable("B2B mode needs a summary and a work scope, and the model left one out")
+            raise AnswerUnusable("B2B mode needs a summary and a work scope, and the model left one out")
         return suggestion
 
     try:
         return parse_structured(content)
-    except LlmUnavailable:
+    except AnswerUnusable:
+        # An answer that set out as JSON and broke off is a broken answer, not
+        # prose: read as prose, it would commit its own fragments as a message.
+        if strip_reasoning(content).lstrip("` \n").startswith(("{", "json")):
+            raise
         # 200 OK but prose anyway — a proxy that silently ignored the schema.
         return parse_free_text(content)
 
@@ -456,6 +485,8 @@ How to write it:
 - Say what the client or their users can now do, see or rely on.
 - Use only what the entries say. Do not invent results, numbers, deadlines or
   benefits, and do not judge the quality of the work.
+- An entry marked "reverted" was undone later: never count it as achieved. Leave
+  it out, or say plainly that it was tried and taken back.
 - No jargon, no file names, no code identifiers.
 - Plain English, past tense, neutral voice — "This period, the shop gained…",
   not "I" or "we".

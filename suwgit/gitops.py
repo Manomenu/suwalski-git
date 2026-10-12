@@ -6,9 +6,13 @@ machine where only git itself is installed.
 
 from __future__ import annotations
 
+import os
+import re
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 
 # Fallback budget when no config is passed. The real one lives in the config,
@@ -41,13 +45,13 @@ class WorkingTree:
         return bool(self.status.strip())
 
 
-def _git(root: Path | None, *args: str) -> str:
+def _git(root: Path | None, *args: str, env: dict[str, str] | None = None) -> str:
     cmd = ["git"]
     if root is not None:
         cmd += ["-C", str(root)]
     cmd += list(args)
     try:
-        done = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        done = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
     except OSError as exc:
         raise GitError(f"cannot run git: {exc}") from None
     if done.returncode != 0:
@@ -309,3 +313,64 @@ def commit_messages(root: Path, since: str, author: str = "") -> list[tuple[str,
         sha, name, message = record.split("\x1f", 2)
         commits.append((sha.strip(), name.strip(), message.strip()))
     return commits
+
+
+REVERT_RE = re.compile(r"This reverts commit ([0-9a-f]{7,40})")
+# How far back suwgit looks for the commit a set of changes exactly undoes.
+REVERT_LOOKBACK = 20
+
+
+def revert_marks(root: Path, since: str) -> list[tuple[str, date, str]]:
+    """(revert hash, its day, the hash it names) for every revert since `since`, by anyone.
+
+    What `git revert` writes — and what suwgit writes for an exact undo — is a
+    line "This reverts commit <hash>.", which is all this reads.
+    """
+    if not has_head(root):
+        return []
+    out = _git(root, "log", "--all", f"--since={since}", "--grep=This reverts commit", "--format=%H%x1f%aI%x1f%B%x1e")
+    marks = []
+    for record in out.split("\x1e"):
+        if record.count("\x1f") < 2:
+            continue
+        sha, when, message = record.split("\x1f", 2)
+        day = datetime.fromisoformat(when.strip()).astimezone().date()
+        for named in REVERT_RE.findall(message):
+            marks.append((sha.strip(), day, named))
+    return marks
+
+
+def _patch(root: Path, old: str, new: str) -> str:
+    return _git(root, "diff", "--full-index", "--no-color", "--no-renames", "--no-ext-diff", old, new)
+
+
+def _working_tree_id(root: Path) -> str:
+    """The tree the working tree would commit as, built in a scratch index — the real one is untouched."""
+    with tempfile.TemporaryDirectory() as scratch:
+        env = {**os.environ, "GIT_INDEX_FILE": str(Path(scratch) / "index")}
+        _git(root, "read-tree", "HEAD", env=env)
+        _git(root, "add", "-A", env=env)
+        return _git(root, "write-tree", env=env).strip()
+
+
+def exact_revert_of(root: Path, lookback: int = REVERT_LOOKBACK) -> tuple[str, str] | None:
+    """(hash, title) of a recent commit the uncommitted changes exactly undo, if there is one.
+
+    "Exactly" is literal: the patch from HEAD to the working tree is the
+    reverse of that commit's patch, byte for byte. That is what undoing a
+    change by hand looks like — and what a model, which sees only the diff,
+    would otherwise describe as new work. A partial undo is not caught here.
+    """
+    if not has_head(root):
+        return None
+    change = _patch(root, "HEAD", _working_tree_id(root))
+    if not change.strip():
+        return None
+    log = _git(root, "log", "--no-merges", f"--max-count={lookback}", "--format=%H%x1f%P%x1f%s", "HEAD")
+    for line in log.splitlines():
+        sha, parents, title = line.split("\x1f", 2)
+        if not parents.strip():
+            continue  # the root commit has nothing to go back to
+        if _patch(root, sha, parents.split()[0]) == change:
+            return sha, title
+    return None

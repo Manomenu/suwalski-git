@@ -112,3 +112,82 @@ def test_long_descriptions_are_truncated_at_a_word_boundary():
 
 def test_strip_reasoning_leaves_plain_text_alone():
     assert strip_reasoning("[feature] added a thing") == "[feature] added a thing"
+
+
+# --- an answer that comes back unusable is asked for once more -------------------
+
+
+def _stub(monkeypatch, *contents, finish="stop"):
+    from suwgit import llm
+
+    replies = list(contents)
+    calls = []
+
+    def post(cfg, payload):
+        calls.append(payload)
+        return {"choices": [{"message": {"content": replies.pop(0)}, "finish_reason": finish}], "usage": {"completion_tokens": 3000}}
+
+    monkeypatch.setattr(llm, "_post", post)
+    return calls
+
+
+def _ask(b2b=False):
+    from pathlib import Path
+
+    from suwgit import gitops, llm
+    from suwgit.config import LlmConfig
+
+    tree = gitops.WorkingTree(root=Path("/r"), status=" M a", stat="", diff="")
+    return llm.suggest_commit_message(LlmConfig(base_url="http://x", model="m"), tree, b2b=b2b)
+
+
+def test_a_cut_off_answer_is_asked_for_again(monkeypatch):
+    calls = _stub(
+        monkeypatch,
+        '{\n  "categories": ["feature"],\n  "description": "dedupl',
+        '{"categories": ["feature"], "description": "deduplicated work"}',
+    )
+    assert _ask().message == "[feature] deduplicated work"
+    assert len(calls) == 2
+
+
+def test_an_incomplete_b2b_answer_is_asked_for_again(monkeypatch):
+    calls = _stub(
+        monkeypatch,
+        '{"categories": ["feature"], "description": "x", "summary": "", "work_scope": ["did x"]}',
+        '{"categories": ["feature"], "description": "x", "summary": "Did x.", "work_scope": ["did x"]}',
+    )
+    assert _ask(b2b=True).summary == "Did x."
+    assert len(calls) == 2
+
+
+def test_two_unusable_answers_give_up_and_say_so(monkeypatch):
+    from suwgit.llm import AnswerUnusable
+
+    calls = _stub(monkeypatch, '{"categories": ["feature"], "descr', '{"categories": ["feature"], "descr', finish="length")
+    with pytest.raises(AnswerUnusable, match="cut off after 3000 tokens.*asked 2 times"):
+        _ask()
+    assert len(calls) == 2
+
+
+def test_an_unreachable_server_is_not_asked_again(monkeypatch):
+    from suwgit import llm
+
+    calls = []
+
+    def down(cfg, payload):
+        calls.append(payload)
+        raise LlmUnavailable("cannot reach http://x")
+
+    monkeypatch.setattr(llm, "_post", down)
+    with pytest.raises(LlmUnavailable, match="cannot reach"):
+        _ask()
+    assert len(calls) == 1
+
+
+def test_broken_json_is_never_committed_as_prose(monkeypatch):
+    from suwgit.llm import AnswerUnusable
+
+    _stub(monkeypatch, '{"categories": ["feature"], "description": "dedupl', '```json\n{"categories": ["feature"], "descr')
+    with pytest.raises(AnswerUnusable):
+        _ask()

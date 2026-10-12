@@ -29,6 +29,7 @@ class Result:
     pushed: str = ""  # what the push did, empty if it did not happen
     push_error: str = ""  # why it did not, if it was meant to
     unsafe: bool = False  # the model saw something that must not reach a git history
+    reverts: str = ""  # the commit these changes exactly undid, committed as its revert
     deferred: bool = False  # left alone because the files are still being edited
 
 
@@ -100,7 +101,12 @@ def commit_repo(
                     )
                     return Result(root, False, "changes are still warm", deferred=True)
 
-                suggestion = suggest_commit_message(config.llm, tree, b2b=bool(tenant))
+                # Changes that exactly undo a recent commit are its revert, not
+                # new work: committed as `git revert` would, never as B2B work,
+                # and the report marks the undone work. The model is still
+                # asked, for the secret check — an undo can bring one back.
+                undoes = gitops.exact_revert_of(root)
+                suggestion = suggest_commit_message(config.llm, tree, b2b=bool(tenant) and not undoes)
 
                 if suggestion.unsafe:
                     # Refusing is the whole point: a secret in a git history is
@@ -113,11 +119,19 @@ def commit_repo(
 
                 title = f"{prefix} {suggestion.message}" if prefix else suggestion.message
                 message = title
-                if tenant:
+                if undoes:
+                    title = f'Revert "{undoes[1]}"'
+                    title = f"{prefix} {title}" if prefix else title
+                    message = f"{title}\n\nThis reverts commit {undoes[0]}."
+                    if tenant:
+                        log.info("%s: the changes undo %s, committed as its revert rather than as B2B work", root, undoes[0][:10])
+                elif tenant:
                     start, end = b2b_format.work_period(gitops.change_times(root, tree.status), time.time())
-                    message = b2b_format.compose(title, suggestion.summary, suggestion.work_scope, project_name, tenant, start, end)
+                    message = b2b_format.compose(
+                        title, suggestion.summary, suggestion.work_scope, project_name, tenant, start, end, b2b_format.new_work_id()
+                    )
                 commit = gitops.commit_all(root, message)
-                if tenant:
+                if tenant and not undoes:
                     try:
                         tenants.record(tenant, root)
                     except OSError as exc:
@@ -125,7 +139,7 @@ def commit_repo(
                         log.warning("%s: committed, but could not note it in the tenant index (%s)", root, exc)
                 log.info("%s: committed %s %s", root, commit, title)
                 repolog.clear(root)
-                result = Result(root, True, "committed", message=message, commit=commit)
+                result = Result(root, True, "committed", message=message, commit=commit, reverts=undoes[0] if undoes else "")
             else:
                 pending = gitops.pending_commits(root) if should_push else 0
                 if not pending:

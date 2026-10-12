@@ -120,6 +120,15 @@ September?"), use JSON instead of making a PDF:
 suwgit report --tenant lokum --from 2026-09-01 --to 2026-09-30 --format json --no-summary | jq '.projects[] | {name, entries: [.entries[] | {day: .work_period.start[:10], summary}]}'
 ```
 
+In the JSON, an entry with `"reverted": "<day>"` is work a later revert
+undid: it is listed, not delivered. Say so when you sum up work; `--hide-reverted`
+leaves it out. One piece of work counts once even if it was cherry-picked or
+rebased.
+
+To undo client work, prefer `git revert <hash>`, or undo the change and run
+`suwgit commit`: an exact undo is committed as a revert, never as new B2B work,
+and the report marks the original as reverted.
+
 Make the PDF only when the user wants the file, and tell them its path. A
 report needs the LLM server for its project summaries; when it is down the
 report is still made, without them.

@@ -762,3 +762,157 @@ def test_worktrees_of_one_repository_count_each_commit_once(tmp_path):
     entries = b2b.collect([repo, tmp_path / "other"], "lokum", date.today(), date.today())
 
     assert sorted(e.title for e in entries) == ["[feature] added main-work", "[feature] added other-work"]
+
+
+# --- one piece of work, many commits: cherry-pick, rebase, revert ----------------
+
+
+def _git(repo, *args):
+    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True).stdout.strip()
+
+
+def _suwgit_b2b(repo, monkeypatch, name="work.txt"):
+    """A B2B commit as suwgit makes it, Work-Id included; its hash."""
+    monkeypatch.setattr(committer, "suggest_commit_message", _suggest)
+    (repo / name).write_text(name)
+    assert committer.commit_repo(_config(), repo, tenant="lokum", project="Shop").committed
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _report(repo):
+    return b2b.collect([repo], "lokum", date.today(), date.today())
+
+
+def test_a_b2b_commit_carries_a_work_id(sandbox, tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    _suwgit_b2b(repo, monkeypatch)
+    [entry] = _report(repo)
+    assert len(entry.work_id) == 12
+    assert f"Work-Id: {entry.work_id}" in _message(repo)
+
+
+@pytest.mark.parametrize("pick", [["cherry-pick"], ["cherry-pick", "-x"]])
+def test_a_cherry_picked_copy_counts_once(sandbox, tmp_path, monkeypatch, pick):
+    repo = _repo(tmp_path / "repo")
+    gitops.commit_all(repo, "[chore] init")
+    _git(repo, "branch", "other")
+    sha = _suwgit_b2b(repo, monkeypatch)
+    _git(repo, "checkout", "-q", "other")
+    _git(repo, *pick, sha)
+
+    assert len(_report(repo)) == 1
+
+
+def test_an_old_commit_without_a_work_id_counts_once_when_copied(sandbox, tmp_path):
+    repo = _repo(tmp_path / "repo")
+    gitops.commit_all(repo, "[chore] init")
+    _git(repo, "branch", "other")
+    _b2b_commit(repo, "old-style", datetime.now().astimezone())
+    _git(repo, "checkout", "-q", "other")
+    _git(repo, "cherry-pick", "-x", "main")
+
+    assert len(_report(repo)) == 1
+
+
+def test_an_amended_commit_kept_on_a_backup_branch_counts_once(sandbox, tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    _suwgit_b2b(repo, monkeypatch)
+    _git(repo, "branch", "backup")
+    (repo / "extra.txt").write_text("forgotten file")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "--amend", "--no-edit")
+
+    assert len(_report(repo)) == 1
+
+
+def test_git_revert_marks_the_work_reverted(sandbox, tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    sha = _suwgit_b2b(repo, monkeypatch)
+    _git(repo, "revert", "--no-edit", sha)
+
+    [entry] = _report(repo)  # the work stays in the report, the revert itself is not work
+    assert entry.reverted == date.today()
+
+
+def test_reverting_the_revert_brings_the_work_back(sandbox, tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    sha = _suwgit_b2b(repo, monkeypatch)
+    _git(repo, "revert", "--no-edit", sha)
+    _git(repo, "revert", "--no-edit", "HEAD")
+
+    [entry] = _report(repo)
+    assert entry.reverted is None
+
+
+def test_reverting_a_cherry_picked_copy_marks_the_work(sandbox, tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    gitops.commit_all(repo, "[chore] init")
+    _git(repo, "branch", "other")
+    sha = _suwgit_b2b(repo, monkeypatch)
+    _git(repo, "checkout", "-q", "other")
+    _git(repo, "cherry-pick", sha)
+    _git(repo, "revert", "--no-edit", "HEAD")
+
+    [entry] = _report(repo)
+    assert entry.reverted == date.today()
+
+
+def test_a_colleagues_revert_still_marks_your_work(sandbox, tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    sha = _suwgit_b2b(repo, monkeypatch)
+    _git(repo, "-c", "user.email=colleague@example.com", "revert", "--no-edit", sha)
+
+    [entry] = _report(repo)
+    assert entry.reverted == date.today()
+
+
+def test_undoing_a_change_by_hand_is_committed_as_its_revert(sandbox, tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    (repo / "TODO.md").write_text("one\n")
+    gitops.commit_all(repo, "[chore] todo")
+    sha = _suwgit_b2b(repo, monkeypatch, name="TODO.md")  # the B2B commit rewrites TODO.md
+    (repo / "TODO.md").write_text("one\n")  # and the user puts it back by hand
+
+    result = committer.commit_repo(_config(), repo, tenant="lokum", project="Shop")
+
+    assert result.committed and result.reverts == sha
+    message = _message(repo)
+    assert message.startswith('Revert "[feature,bugfix] added csv export and fixed main tab"')
+    assert f"This reverts commit {sha}." in message
+    assert "Work-Period" not in message  # not new work
+    [entry] = _report(repo)
+    assert entry.reverted == date.today()
+
+
+def test_a_partial_undo_is_not_taken_for_a_revert(sandbox, tmp_path):
+    repo = _repo(tmp_path / "repo")
+    gitops.commit_all(repo, "[chore] init")
+    (repo / "a.txt").write_text("hi\nmore\nand more\n")
+    gitops.commit_all(repo, "[feature] more")
+    (repo / "a.txt").write_text("hi\nmore\n")
+    assert gitops.exact_revert_of(repo) is None
+
+
+def test_the_report_marks_reverted_work_and_can_hide_it(sandbox, tmp_path, monkeypatch, capsys):
+    import json
+
+    repo = _repo(tmp_path / "repo")
+    sha = _suwgit_b2b(repo, monkeypatch)
+    _git(repo, "revert", "--no-edit", sha)
+    _suwgit_b2b(repo, monkeypatch, name="kept.txt")
+    tenants.record("lokum", repo)
+    monkeypatch.setattr(main.config_module, "load", lambda: _config())
+    asked = []
+    monkeypatch.setattr(main, "summarize_project", lambda cfg, name, first, last, work: asked.extend(work) or "x")
+
+    assert main.main(["report", "--tenant", "lokum", "--format", "json"]) == 0
+    entries = json.loads(capsys.readouterr().out)["projects"][0]["entries"]
+    assert [e["reverted"] for e in entries] == [date.today().isoformat(), None]
+    assert "reverted on" in asked[0][0] and "reverted" not in asked[1][0]  # the summary is told
+
+    assert main.main(["report", "--tenant", "lokum", "--format", "json", "--hide-reverted", "--no-summary"]) == 0
+    assert len(json.loads(capsys.readouterr().out)["projects"][0]["entries"]) == 1
+
+    entries = b2b.collect([repo], "lokum", date.today(), date.today())
+    pdf = report.build(entries, date.today(), date.today(), datetime.now().astimezone())
+    assert b"Reverted" in pdf and b"this work was undone later" in pdf
