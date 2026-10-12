@@ -5,6 +5,7 @@ database in between, so most of these tests go through a real git history.
 """
 
 import os
+import re
 import subprocess
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -537,3 +538,20 @@ def test_yes_skips_the_question(sandbox, tmp_path, monkeypatch):
     assert main.main(["commit", str(repo), "--no-push", "--b2b", "-y"]) == 0
     assert asked == []
     assert b2b.parse(_message(repo), repo, "x").tenant == "lokum"
+
+
+def test_list_shows_every_tenant_with_its_folders_and_projects(sandbox, monkeypatch, capsys):
+    tenants.record("lokum", Path("/r/shop"))
+    tenants.record("lokum", Path("/r/shared"))
+    tenants.record("acme", Path("/r/shared"))
+    tenants.remember(Path("/r/shared"), "acme", "Acme CRM")
+    config = _config(
+        repos=[RepoEntry("/r/shop", default_tenant="lokum", default_project="Lokum Shop"), RepoEntry("/r/api", default_tenant="lokum")]
+    )
+    monkeypatch.setattr(main.config_module, "load", lambda: config)
+    monkeypatch.setattr(main.install, "service_status", lambda: "active")
+
+    assert main.main(["list"]) == 0
+    out = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
+    plain = [line.strip() for line in out.split("tenants\n")[1].splitlines() if line.strip()]
+    assert plain == ["acme, shared (Acme CRM)", "lokum, api", "lokum, shared", "lokum, shop (Lokum Shop)"]

@@ -102,7 +102,6 @@ def cmd_list(_args: argparse.Namespace) -> int:
     print(f"\n{BOLD}registered{RESET}")
     if not config.repos:
         print(f"  {DIM}nothing yet — suwgit register <folder>{RESET}")
-        return 0
     for entry in config.repos:
         root = Path(entry.path)
         if not (root / ".git").exists():
@@ -113,7 +112,38 @@ def cmd_list(_args: argparse.Namespace) -> int:
             except gitops.GitError:
                 state = f"{RED}unreadable{RESET}"
         print(f"  {entry.path}  {state}  {DIM}{_describe(entry, config)}{RESET}")
+
+    print(f"\n{BOLD}tenants{RESET}")
+    rows = _tenant_rows(config)
+    if not rows:
+        print(f"  {DIM}none yet — suwgit commit --b2b <tenant>, or suwgit register <folder> --default-b2b <tenant>{RESET}")
+    for tenant, root, project in rows:
+        print(f"  {tenant}, {root.name}" + (f" {DIM}({project}){RESET}" if project else ""))
     return 0
+
+
+def _tenant_rows(config: config_module.Config) -> list[tuple[str, Path, str]]:
+    """(tenant, repository, project) for every repository a tenant is known in.
+
+    Known means a B2B commit was made there (the tenant index), or it is the
+    repository's default tenant. The project is the one a bare --b2b there would
+    use for that tenant — the default, else the last used by hand — if there is one.
+    """
+    pairs = {(tenant, Path(path)) for tenant, repos in tenants.load().items() for path in repos}
+    pairs |= {(e.default_tenant, Path(e.path)) for e in config.repos if e.default_tenant}
+
+    rows = []
+    for tenant, root in pairs:
+        entry = config.entry(root)
+        last = tenants.last_used(root)
+        if entry and entry.default_tenant == tenant and entry.default_project:
+            project = entry.default_project
+        elif last and last[0] == tenant:
+            project = last[1]
+        else:
+            project = ""
+        rows.append((tenant, root, project))
+    return sorted(rows, key=lambda row: (row[0].lower(), row[1].name.lower()))
 
 
 # What a bare `--b2b` / `--project` parses to: "the repository's default".

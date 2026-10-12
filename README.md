@@ -66,7 +66,7 @@ suwgit list
 | `suwgit init` | interactive setup; safe to run again |
 | `suwgit register <folder>` | watch a repository (it must have a git remote); run it again to change its settings — `--default-b2b <tenant>` / `--no-default-b2b`, `--default-project <name>`, `--auto-commit` / `--no-auto-commit` |
 | `suwgit unregister <folder>` | stop watching it |
-| `suwgit list` | config, service state, and which repositories are dirty |
+| `suwgit list` | config, service state, which repositories are dirty, and every tenant as `tenant, folder (project)` |
 | `suwgit commit [path]` | commit the closest repository above `path` now, and print the message (`--push` / `--no-push` override the config for one run; `--b2b [tenant]` and `--project [name]` make it a B2B commit, `-y` skips the confirmation) |
 | `suwgit push [path]` | the same thing with the push forced on |
 | `suwgit report --tenant <tenant>` | a PDF of your B2B commits for one client (`--from` / `--to` as `YYYY-MM-DD`, default: the last 30 days, today included; `-o` for a file or a folder, default: the current folder) |
