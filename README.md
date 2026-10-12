@@ -58,7 +58,9 @@ and shows days only:
 | `--no-summary` | leave out the project summaries: faster, and works without the AI server |
 | `--hide-reverted` | leave out work a later revert undid |
 | `-o ~/invoices/` | where to save it: a file or a folder (default: the current folder, as `lokum--<today>.pdf`) |
-| `--mail client@example.com` | send the PDF to this address, from your own mailbox (set up in `init`); repeat for more people. It asks `[y/N]` once the PDF is made, so you can look at it first; `-y` sends without asking |
+| `--mail client@example.com` | send the PDF to this address from your own mailbox; repeat for more people. It asks `[y/N]` once the PDF is made, so you can look at it first; `-y` sends without asking |
+| `--mail` | the same, to whoever got this client's last report: it names them and asks `[Y/n]`, or lets you type others |
+| `--mail-from me@work.com` | which of your mailboxes to send from. With just one, that one; with several, you pick with the arrow keys |
 | `--format json` | print the report as JSON instead, for scripts: `suwgit report --tenant lokum --format json \| jq` |
 
 The report lists only your own commits, from every repository where you did
@@ -156,7 +158,7 @@ cd ~/Repos/suwalski-git
 
 `init` asks for your server, how often to commit, whether to push, and
 your name for reports ("Prepared by"), and, if you want reports sent by e-mail,
-your mailbox's SMTP settings. It then puts `suwgit` on your PATH for
+a mailbox to send them from (add more later with `suwgit add-mail`). It then puts `suwgit` on your PATH for
 Git Bash, cmd and PowerShell, and adds a Task Scheduler entry named `suwgit`.
 Run it again any time: every question offers your current answer, so Enter
 keeps it. Open a new terminal, then:
@@ -217,10 +219,11 @@ commit refused for a possible secret, and never force-pushes.
 |---|---|
 | `suwgit register <folder>` | watch a repository; run again to change its settings: `--default-b2b <tenant>`, `--default-project <name>`, `--no-auto-commit` |
 | `suwgit unregister <folder>` | stop watching it |
-| `suwgit list` | the setup, every repository and whether it has changes, and every client as `tenant, folder (project)` |
+| `suwgit list` | the setup, every repository and whether it has changes, every client as `tenant, folder (project)`, and your mailboxes |
 | `suwgit commit [path]` | commit now; `-p <ticket>` for a task id, `--b2b [tenant]` / `--project [name]` for client work, `-y` to skip the question, `--push` / `--no-push` |
 | `suwgit push [path]` | commit now and push |
 | `suwgit report --tenant <tenant>` | the PDF report; see [above](#the-report) |
+| `suwgit add-mail [address]` / `remove-mail <address>` | add (or update) a mailbox reports can be sent from / forget one |
 | `suwgit logs [-n N] [-f]` | what the scheduled sweeps did |
 | `suwgit sweep` | one pass over every repository, as the scheduled task does |
 | `suwgit init` | set up, or change the setup; safe to run again |

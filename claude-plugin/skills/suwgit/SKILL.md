@@ -56,9 +56,12 @@ The questions, so the user can prepare answers:
 - **Push** after each commit: off is the safe default.
 - **Name on reports** ("Prepared by"): the user's real name, as the client
   should read it.
-- **E-mail** (optional): to send reports with `--mail`, the SMTP server, port,
-  encryption (starttls 587 / ssl 465), login, password and From address. Gmail
-  and Outlook need an app password, not the account password.
+- **E-mail** (optional): a mailbox to send reports from — its address, SMTP
+  server, encryption (starttls 587 / ssl 465), login and password. Gmail and
+  Outlook need an app password, not the account password. More mailboxes are
+  added later with `! suwgit add-mail <address>` (the user runs it: it asks for
+  the password); `suwgit remove-mail <address>` forgets one, and you may run
+  that when asked.
 
 Re-running `init` is safe: every question offers the current value, and Enter
 keeps it. After `init`, a new terminal puts `suwgit` on PATH. Then register
@@ -90,7 +93,7 @@ the path for a tenant name.
 | report saved elsewhere | add `-o <file or folder>` |
 | report as data | `suwgit report --tenant <tenant> --format json` (stdout only; pipe to `jq`) |
 | report without the AI project summaries | add `--no-summary` |
-| report sent by e-mail | add `--mail <address> -y` — only after the user saw the PDF and agreed (see Rules) |
+| report sent by e-mail | add `--mail <address> -y` — only after the user saw the PDF and agreed (see Rules); with several mailboxes also `--mail-from <address>` |
 | setup, repositories, tenants | `suwgit list` |
 | what the background service did | `suwgit logs -n 50` |
 | stop watching a repository | `suwgit unregister <path>` |

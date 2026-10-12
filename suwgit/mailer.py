@@ -34,7 +34,7 @@ class MailError(Exception):
 
 
 def not_set_up() -> str:
-    return "e-mail is not set up — run `suwgit init` and answer yes to 'Send reports by e-mail?'"
+    return "no mailbox to send from — add one: suwgit add-mail <your address>"
 
 
 def report_text(period: str, author: str) -> tuple[str, str]:

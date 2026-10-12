@@ -28,8 +28,11 @@ LOG_FILE = STATE_DIR / "suwgit.log"
 LOCK_DIR = STATE_DIR / "locks"
 # The vLLM key never goes into the config file — it stays here, in the profile.
 API_KEY_FILE = STATE_DIR / "api_key"
-# The mailbox password `suwgit report --mail` sends with, kept out of the config for the same reason.
-MAIL_PASSWORD_FILE = STATE_DIR / "mail_password"
+# The mailbox passwords `suwgit report --mail` sends with, by sender address,
+# kept out of the config for the same reason.
+MAIL_PASSWORDS_FILE = STATE_DIR / "mail_passwords.json"
+# Where each tenant's last report was mailed, and from which mailbox.
+LAST_MAIL_FILE = STATE_DIR / "last-mail.json"
 # Which repositories ever got a B2B commit for which tenant, so a report knows
 # where to look. An index only: the commits themselves are the record.
 TENANTS_FILE = STATE_DIR / "tenants.json"

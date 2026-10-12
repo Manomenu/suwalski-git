@@ -41,7 +41,7 @@ class LlmConfig:
 
 @dataclass
 class MailConfig:
-    """The mailbox `suwgit report --mail` sends from. Optional: empty until `init` sets it up."""
+    """One mailbox `suwgit report --mail` can send from, known by its sender address."""
 
     host: str = ""
     port: int = 587
@@ -49,7 +49,7 @@ class MailConfig:
     # relay on a trusted network.
     security: str = "starttls"
     username: str = ""
-    password: str = ""  # never written to the config — see write_mail_password
+    password: str = ""  # never written to the config — see write_mail_passwords
     sender: str = ""  # the From address; the username when that is an address
 
     @property
@@ -87,7 +87,8 @@ class Config:
     # "Prepared by" on `suwgit report`. Empty means the commits' author names,
     # which are often a handle rather than the name a client should read.
     report_author: str = ""
-    mail: MailConfig = field(default_factory=MailConfig)
+    # The mailboxes reports can be sent from: none until `init` or `add-mail`.
+    mailboxes: list[MailConfig] = field(default_factory=list)
     repos: list[RepoEntry] = field(default_factory=list)
 
     def entry(self, root: Path) -> RepoEntry | None:
@@ -126,20 +127,23 @@ def write_api_key(api_key: str) -> None:
     paths.API_KEY_FILE.write_text(api_key + "\n", encoding="utf-8")
 
 
-def read_mail_password() -> str:
+def read_mail_passwords() -> dict[str, str]:
+    """Sender address → password, from ~/.local/state/suwgit/mail_passwords.json."""
     try:
-        return paths.MAIL_PASSWORD_FILE.read_text(encoding="utf-8").rstrip("\n")
-    except OSError:
-        return ""
+        raw = json.loads(paths.MAIL_PASSWORDS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
 
 
-def write_mail_password(password: str) -> None:
+def write_mail_passwords(mailboxes: list[MailConfig]) -> None:
     """Beside the API key, and like it without chmod: see write_api_key."""
     paths.STATE_DIR.mkdir(parents=True, exist_ok=True)
-    if not password:
-        paths.MAIL_PASSWORD_FILE.unlink(missing_ok=True)
+    passwords = {m.sender: m.password for m in mailboxes if m.password}
+    if not passwords:
+        paths.MAIL_PASSWORDS_FILE.unlink(missing_ok=True)
         return
-    paths.MAIL_PASSWORD_FILE.write_text(password + "\n", encoding="utf-8")
+    paths.MAIL_PASSWORDS_FILE.write_text(json.dumps(passwords, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def load() -> Config:
@@ -165,20 +169,53 @@ def load() -> Config:
         push=bool(raw.get("push", False)),
         max_diff_chars=int(raw.get("max_diff_chars", DEFAULT_MAX_DIFF_CHARS)),
         report_author=str(raw.get("report_author", "")),
-        mail=_mail(raw.get("mail") or {}),
+        mailboxes=_mailboxes(raw),
         repos=[_repo_entry(item) for item in raw.get("repos", [])],
     )
 
 
-def _mail(raw: dict) -> MailConfig:
-    return MailConfig(
-        host=str(raw.get("host", "")),
-        port=int(raw.get("port", 587)),
-        security=str(raw.get("security", "starttls")),
-        username=str(raw.get("username", "")),
-        password=read_mail_password(),
-        sender=str(raw.get("sender", "")),
-    )
+def _mailboxes(raw: dict) -> list[MailConfig]:
+    """Every mailbox, with its password. A config from before several mailboxes has one, as `mail`."""
+    items = raw.get("mailboxes")
+    if items is None:
+        items = [raw["mail"]] if isinstance(raw.get("mail"), dict) else []
+    passwords = read_mail_passwords()
+    boxes = []
+    for item in items:
+        box = MailConfig(
+            host=str(item.get("host", "")),
+            port=int(item.get("port", 587)),
+            security=str(item.get("security", "starttls")),
+            username=str(item.get("username", "")),
+            sender=str(item.get("sender", "")),
+        )
+        box.password = passwords.get(box.sender, "")
+        if box.is_configured:
+            boxes.append(box)
+    return boxes
+
+
+def mailbox(config: Config, sender: str) -> MailConfig | None:
+    """The mailbox sending as `sender`, matched without regard to case."""
+    return next((m for m in config.mailboxes if m.sender.lower() == sender.strip().lower()), None)
+
+
+def add_mailbox(config: Config, box: MailConfig) -> str:
+    """Add a mailbox, or replace the one with the same sender. Returns "added" or "updated"."""
+    existing = mailbox(config, box.sender)
+    if existing is None:
+        config.mailboxes.append(box)
+        return "added"
+    config.mailboxes[config.mailboxes.index(existing)] = box
+    return "updated"
+
+
+def remove_mailbox(config: Config, sender: str) -> bool:
+    existing = mailbox(config, sender)
+    if existing is None:
+        return False
+    config.mailboxes.remove(existing)
+    return True
 
 
 def _repo_entry(item) -> RepoEntry:
@@ -208,9 +245,10 @@ def save(config: Config, path: Path | None = None) -> Path:
 
     document = asdict(config)
     document["llm"]["api_key"] = ""
-    document["mail"]["password"] = ""
+    for box in document["mailboxes"]:
+        box.pop("password")
     write_api_key(config.llm.api_key)
-    write_mail_password(config.mail.password)
+    write_mail_passwords(config.mailboxes)
 
     tmp = target.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
