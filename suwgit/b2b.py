@@ -148,6 +148,9 @@ def collect(repos: list[Path], tenant: str, first: date, last: date) -> list[Ent
     commits are their record, not yours.
     """
     entries = []
+    # Two worktrees of one repository, or a clone listed twice, share commits:
+    # `--all` in each finds the same ones, and each must count once.
+    seen: set[str] = set()
     for root in repos:
         if not (root / ".git").exists():
             continue
@@ -161,6 +164,9 @@ def collect(repos: list[Path], tenant: str, first: date, last: date) -> list[Ent
         except gitops.GitError:
             continue
         for sha, author, message in commits:
+            if sha in seen:
+                continue
+            seen.add(sha)
             entry = parse(message, root, sha, author)
             if entry and entry.tenant == tenant and first <= entry.start.astimezone().date() <= last:
                 entries.append(entry)

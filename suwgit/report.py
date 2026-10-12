@@ -160,13 +160,31 @@ def _entry_rows(entry: Entry, width: float, with_time: bool) -> list[tuple[str, 
     ]
 
 
-def build(entries: list[Entry], first: date, last: date, generated: datetime, with_time: bool = False, author: str = "") -> bytes:
+def by_project(entries: list[Entry]) -> dict[str, list[Entry]]:
+    """Entries grouped by project, in the order they come (sorted by project, then time)."""
+    projects: dict[str, list[Entry]] = {}
+    for entry in entries:
+        projects.setdefault(entry.project, []).append(entry)
+    return projects
+
+
+def build(
+    entries: list[Entry],
+    first: date,
+    last: date,
+    generated: datetime,
+    with_time: bool = False,
+    author: str = "",
+    summaries: dict[str, str] | None = None,
+) -> bytes:
     """The whole report as PDF bytes. `entries` come sorted by project, then time.
 
     Days only by default; `with_time` adds the hours and minutes of every work
     period, and the timezone they are in. `author` is the Prepared by line;
-    empty, it lists the commits' author names.
+    empty, it lists the commits' author names. `summaries` maps a project to
+    the paragraph that opens its section; a project without one has none.
     """
+    summaries = summaries or {}
     doc = _Document()
     width = PAGE_WIDTH - 2 * MARGIN
     span = f"{first:%Y-%m-%d} – {last:%Y-%m-%d}"
@@ -188,9 +206,7 @@ def build(entries: list[Entry], first: date, last: date, generated: datetime, wi
         doc.text(MARGIN + LABEL_WIDTH, value)
         doc.y -= LEADING
 
-    projects: dict[str, list[Entry]] = {}
-    for entry in entries:
-        projects.setdefault(entry.project, []).append(entry)
+    projects = by_project(entries)
 
     doc.y -= 10
     doc.text(MARGIN, "Projects", BOLD, 12)
@@ -206,6 +222,7 @@ def build(entries: list[Entry], first: date, last: date, generated: datetime, wi
         doc.y -= LEADING
 
     for number, (name, items) in enumerate(projects.items()):
+        summary = wrap(summaries[name], REGULAR, BODY_SIZE, width) if summaries.get(name) else []
         # Every project after the first starts a page of its own: it never
         # begins as an orphaned heading, and the pages can be handed on per project.
         if number:
@@ -213,10 +230,18 @@ def build(entries: list[Entry], first: date, last: date, generated: datetime, wi
             doc.y = PAGE_HEIGHT - MARGIN - 8
         else:
             doc.y -= 24
+            # The heading, its summary and the first entry stay together.
+            doc.room(110 + len(summary) * LEADING)
         doc.text(MARGIN, f"Project: {name}", BOLD, 15)
         doc.y -= 10
         doc.rule(INK)
         doc.y -= 20
+
+        if summary:
+            for line in summary:
+                doc.text(MARGIN, line)
+                doc.y -= LEADING
+            doc.y -= 12
 
         for entry in items:
             rows = _entry_rows(entry, width, with_time)
@@ -234,13 +259,19 @@ def build(entries: list[Entry], first: date, last: date, generated: datetime, wi
     return doc.render(title=f"Work report {span}", footer=f"Work report  ·  {span}")
 
 
-def as_json(entries: list[Entry], tenant: str, first: date, last: date, generated: datetime, author: str = "") -> dict:
+def as_json(
+    entries: list[Entry],
+    tenant: str,
+    first: date,
+    last: date,
+    generated: datetime,
+    author: str = "",
+    summaries: dict[str, str] | None = None,
+) -> dict:
     """The same report as data, for `--format json` — everything the PDF shows, plus
     what tooling needs and a client does not: the tenant, the technical title, full
     commit hashes, repository paths and exact times."""
-    projects: dict[str, list[Entry]] = {}
-    for entry in entries:
-        projects.setdefault(entry.project, []).append(entry)
+    projects = by_project(entries)
     return {
         "tenant": tenant,
         "period": {"from": first.isoformat(), "to": last.isoformat()},
@@ -249,6 +280,7 @@ def as_json(entries: list[Entry], tenant: str, first: date, last: date, generate
         "projects": [
             {
                 "name": name,
+                "summary": (summaries or {}).get(name, ""),
                 "entries": [
                     {
                         "work_period": {

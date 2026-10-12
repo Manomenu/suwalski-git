@@ -649,3 +649,116 @@ def test_a_prefix_leads_the_title_of_a_b2b_commit(sandbox, tmp_path, monkeypatch
     entry = b2b.parse(_message(repo), repo, "x")
     assert entry.title == "EH-3311111 [feature,bugfix] added csv export and fixed main tab"
     assert entry.summary == SUMMARY
+
+
+# --- the project summary ---------------------------------------------------------
+
+
+def _answer(content):
+    return {"choices": [{"message": {"content": content}}]}
+
+
+def test_summarize_project_reads_the_structured_answer(monkeypatch):
+    from suwgit import llm
+
+    sent = {}
+
+    def post(cfg, payload):
+        sent.update(payload)
+        return _answer('{"summary": "This period the shop gained a checkout."}')
+
+    monkeypatch.setattr(llm, "_post", post)
+    work = [("2026-10-12", "Customers can now pay in the shop.", ["added a checkout page"])]
+
+    assert llm.summarize_project(LLM, "Lokum Shop", "2026-10-01", "2026-10-31", work) == "This period the shop gained a checkout."
+    user = sent["messages"][1]["content"]
+    assert "Lokum Shop" in user and "2026-10-12: Customers can now pay in the shop." in user and "added a checkout page" in user
+    assert "not technical" in sent["messages"][0]["content"].lower()
+
+
+def test_summarize_project_takes_prose_from_a_server_without_the_schema(monkeypatch):
+    from suwgit import llm
+
+    monkeypatch.setattr(llm, "_post", lambda cfg, payload: _answer("<think>hm</think>The shop gained a checkout."))
+    assert llm.summarize_project(LLM, "Shop", "a", "b", [("d", "s", ["w"])]) == "The shop gained a checkout."
+
+
+def test_an_empty_project_summary_is_llm_unavailable(monkeypatch):
+    from suwgit import llm
+
+    monkeypatch.setattr(llm, "_post", lambda cfg, payload: _answer('{"summary": ""}'))
+    with pytest.raises(LlmUnavailable):
+        llm.summarize_project(LLM, "Shop", "a", "b", [("d", "s", ["w"])])
+
+
+def test_a_long_period_leaves_the_oldest_entries_out(monkeypatch):
+    from suwgit import llm
+
+    monkeypatch.setattr(llm, "MAX_PROJECT_INPUT_CHARS", 300)
+    work = [(f"2026-10-{day:02d}", f"entry {day}", ["did something worth noting"]) for day in range(1, 21)]
+    text = llm._project_input("Shop", "a", "b", work)
+    assert len(text) <= 300
+    assert "entry 20" in text and "entry 1:" not in text
+    assert "older entries left out" in text
+
+
+def _report_setup(tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    _b2b_commit(repo, "work", datetime.now().astimezone() - timedelta(minutes=5), project="Lokum Shop")
+    tenants.record("lokum", repo)
+    monkeypatch.setattr(main.config_module, "load", lambda: _config())
+    monkeypatch.chdir(tmp_path)
+    return repo
+
+
+def test_the_report_opens_each_project_with_its_summary(sandbox, tmp_path, monkeypatch, capsys):
+    import json
+
+    _report_setup(tmp_path, monkeypatch)
+    asked = []
+    monkeypatch.setattr(main, "summarize_project", lambda cfg, name, *a: asked.append(name) or f"{name} moved forward.")
+
+    assert main.main(["report", "--tenant", "lokum", "--format", "json"]) == 0
+    assert json.loads(capsys.readouterr().out)["projects"][0]["summary"] == "Lokum Shop moved forward."
+
+    assert main.main(["report", "--tenant", "lokum", "-o", str(tmp_path / "r.pdf")]) == 0
+    assert b"Lokum Shop moved forward." in (tmp_path / "r.pdf").read_bytes()
+    assert asked == ["Lokum Shop", "Lokum Shop"]
+
+
+def test_no_summary_never_asks_the_model(sandbox, tmp_path, monkeypatch, capsys):
+    import json
+
+    _report_setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(main, "summarize_project", lambda *a: pytest.fail("must not ask the model"))
+
+    assert main.main(["report", "--tenant", "lokum", "--format", "json", "--no-summary"]) == 0
+    assert json.loads(capsys.readouterr().out)["projects"][0]["summary"] == ""
+
+
+def test_an_unreachable_model_still_gives_a_report(sandbox, tmp_path, monkeypatch, capsys):
+    import json
+
+    _report_setup(tmp_path, monkeypatch)
+
+    def down(*a):
+        raise LlmUnavailable("cannot reach http://vllm:8000/v1")
+
+    monkeypatch.setattr(main, "summarize_project", down)
+
+    assert main.main(["report", "--tenant", "lokum", "--format", "json"]) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["projects"][0]["summary"] == ""  # stdout is still clean JSON
+    assert "no project summary" in captured.err
+
+
+def test_worktrees_of_one_repository_count_each_commit_once(tmp_path):
+    repo = _repo(tmp_path / "repo")
+    gitops.commit_all(repo, "[chore] init")
+    subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", "-b", "other", str(tmp_path / "other")], check=True)
+    _b2b_commit(repo, "main-work", datetime.now().astimezone())
+    _b2b_commit(tmp_path / "other", "other-work", datetime.now().astimezone())
+
+    entries = b2b.collect([repo, tmp_path / "other"], "lokum", date.today(), date.today())
+
+    assert sorted(e.title for e in entries) == ["[feature] added main-work", "[feature] added other-work"]

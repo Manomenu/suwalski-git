@@ -361,6 +361,39 @@ def parse_free_text(content: str) -> Suggestion:
     return Suggestion(build([], lines[-1]))
 
 
+def _complete(config: LlmConfig, system: str, user: str, schema: dict) -> str:
+    """One chat completion under `schema`, thinking off; the answer's text.
+
+    A server that rejects the extras — old vLLM, or a proxy in front of it — is
+    asked again without them, and the caller parses whatever prose comes back.
+    """
+    if not config.is_configured:
+        raise LlmUnavailable("LLM base_url/model not configured — run `suwgit init`")
+
+    payload = {
+        "model": config.model,
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        "temperature": 0.2,
+        "max_tokens": MAX_TOKENS,
+        "stream": False,
+        "response_format": schema,
+        "chat_template_kwargs": NO_THINKING,
+    }
+
+    try:
+        return _content(_post(config, payload))
+    except _HttpFailure as exc:
+        if exc.status not in (400, 404, 422, 501):
+            raise LlmUnavailable(f"HTTP {exc.status} from {config.base_url}: {exc.detail}") from None
+        # Old vLLM, or a proxy that rejects the extras: ask again with none of them.
+        payload.pop("response_format")
+        payload.pop("chat_template_kwargs")
+        try:
+            return _content(_post(config, payload))
+        except _HttpFailure as retry_exc:
+            raise LlmUnavailable(f"HTTP {retry_exc.status} from {config.base_url}: {retry_exc.detail}") from None
+
+
 def suggest_commit_message(config: LlmConfig, tree: WorkingTree, b2b: bool = False) -> Suggestion:
     """The whole point: uncommitted changes in, one commit message out.
 
@@ -369,34 +402,7 @@ def suggest_commit_message(config: LlmConfig, tree: WorkingTree, b2b: bool = Fal
     no record of work, so an answer that lacks one raises instead of falling
     back to a bare title.
     """
-    if not config.is_configured:
-        raise LlmUnavailable("LLM base_url/model not configured — run `suwgit init`")
-
-    payload = {
-        "model": config.model,
-        "messages": [
-            {"role": "system", "content": B2B_PROMPT if b2b else SYSTEM_PROMPT},
-            {"role": "user", "content": _user_prompt(tree)},
-        ],
-        "temperature": 0.2,
-        "max_tokens": MAX_TOKENS,
-        "stream": False,
-        "response_format": B2B_RESPONSE_SCHEMA if b2b else RESPONSE_SCHEMA,
-        "chat_template_kwargs": NO_THINKING,
-    }
-
-    try:
-        content = _content(_post(config, payload))
-    except _HttpFailure as exc:
-        if exc.status not in (400, 404, 422, 501):
-            raise LlmUnavailable(f"HTTP {exc.status} from {config.base_url}: {exc.detail}") from None
-        # Old vLLM, or a proxy that rejects the extras: ask again with none of them.
-        payload.pop("response_format")
-        payload.pop("chat_template_kwargs")
-        try:
-            content = _content(_post(config, payload))
-        except _HttpFailure as retry_exc:
-            raise LlmUnavailable(f"HTTP {retry_exc.status} from {config.base_url}: {retry_exc.detail}") from None
+    content = _complete(config, B2B_PROMPT if b2b else SYSTEM_PROMPT, _user_prompt(tree), B2B_RESPONSE_SCHEMA if b2b else RESPONSE_SCHEMA)
 
     if b2b:
         suggestion = parse_structured(content)
@@ -409,3 +415,92 @@ def suggest_commit_message(config: LlmConfig, tree: WorkingTree, b2b: bool = Fal
     except LlmUnavailable:
         # 200 OK but prose anyway — a proxy that silently ignored the schema.
         return parse_free_text(content)
+
+
+# --- the project summary of a report ---------------------------------------------
+
+# How much of a project's recorded work the model reads. Work scopes are short,
+# so this holds months of entries; past it the oldest are left out, and the
+# model is told so.
+MAX_PROJECT_INPUT_CHARS = 40_000
+MAX_PROJECT_SUMMARY_CHARS = 700
+
+PROJECT_SUMMARY_SCHEMA = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "project_summary",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+PROJECT_SUMMARY_PROMPT = """You write the project summary at the top of one project's section in a work
+report that a contractor sends to a client. The client is NOT technical: a
+business owner or manager who knows their product, not its code.
+
+You get the work recorded for the project in the reporting period: each entry
+with its date, a short summary and the pieces of work behind it.
+
+Answer with a JSON object holding one field:
+- "summary": what the work in this period achieved for the project, in 2 to 4
+  plain sentences, at most 80 words.
+
+How to write it:
+- Give the big picture: group the work into its main themes and outcomes rather
+  than retelling the entries one by one.
+- Say what the client or their users can now do, see or rely on.
+- Use only what the entries say. Do not invent results, numbers, deadlines or
+  benefits, and do not judge the quality of the work.
+- No jargon, no file names, no code identifiers.
+- Plain English, past tense, neutral voice — "This period, the shop gained…",
+  not "I" or "we".
+"""
+
+
+def _project_input(project: str, first: str, last: str, entries: list[tuple[str, str, list[str]]]) -> str:
+    """The recorded work as the model reads it, oldest left out first if it runs long."""
+    blocks = []
+    for day, summary, scope in entries:
+        lines = [f"- {day}: {summary}" if summary else f"- {day}"]
+        lines += [f"    - {item}" for item in scope]
+        blocks.append("\n".join(lines))
+
+    header = f"Project: {project}\nPeriod: {first} to {last}\n\nRecorded work:\n"
+
+    def note(omitted: int) -> str:
+        return f"({omitted} older entries left out for length)\n" if omitted else ""
+
+    omitted = 0
+    while blocks and len(header) + len(note(omitted)) + len("\n".join(blocks)) > MAX_PROJECT_INPUT_CHARS:
+        blocks.pop(0)
+        omitted += 1
+    return header + note(omitted) + "\n".join(blocks)
+
+
+def summarize_project(config: LlmConfig, project: str, first: str, last: str, entries: list[tuple[str, str, list[str]]]) -> str:
+    """A plain-language summary of one project's work in a report period.
+
+    `entries` are (day, summary, work scope) for each B2B commit, oldest first.
+    Raises LlmUnavailable when there is nothing usable to say.
+    """
+    content = _complete(config, PROJECT_SUMMARY_PROMPT, _project_input(project, first, last, entries), PROJECT_SUMMARY_SCHEMA)
+    text = strip_reasoning(content).strip().strip("`")
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end != -1:
+        try:
+            payload = json.loads(text[start : end + 1])
+            if isinstance(payload, dict):
+                text = str(payload.get("summary") or "")
+        except json.JSONDecodeError:
+            pass  # prose from a server that ignored the schema: the text is the summary
+    summary = " ".join(text.split()).strip('"')
+    if not summary:
+        raise LlmUnavailable("model returned an empty project summary")
+    if len(summary) > MAX_PROJECT_SUMMARY_CHARS:
+        summary = summary[:MAX_PROJECT_SUMMARY_CHARS].rsplit(" ", 1)[0].rstrip(",") + "…"
+    return summary
