@@ -44,6 +44,24 @@ class LlmConfig:
 
 
 @dataclass
+class MailConfig:
+    """The mailbox `suwgit report --mail` sends from. Optional: empty until `init` sets it up."""
+
+    host: str = ""
+    port: int = 587
+    # "starttls" (port 587, most providers), "ssl" (port 465), or "none" for a
+    # relay on a trusted network.
+    security: str = "starttls"
+    username: str = ""
+    password: str = ""  # never written to the config — see write_mail_password
+    sender: str = ""  # the From address; the username when that is an address
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.host and self.sender)
+
+
+@dataclass
 class RepoEntry:
     """One registered repository and how suwgit treats it."""
 
@@ -72,6 +90,7 @@ class Config:
     # "Prepared by" on `suwgit report`. Empty means the commits' author names,
     # which are often a handle rather than the name a client should read.
     report_author: str = ""
+    mail: MailConfig = field(default_factory=MailConfig)
     repos: list[RepoEntry] = field(default_factory=list)
 
     def entry(self, root: Path) -> RepoEntry | None:
@@ -107,6 +126,22 @@ def write_api_key(api_key: str) -> None:
         return
     paths.API_KEY_FILE.write_text(api_key + "\n", encoding="utf-8")
     os.chmod(paths.API_KEY_FILE, 0o600)
+
+
+def read_mail_password() -> str:
+    try:
+        return paths.MAIL_PASSWORD_FILE.read_text(encoding="utf-8").rstrip("\n")
+    except OSError:
+        return ""
+
+
+def write_mail_password(password: str) -> None:
+    paths.STATE_DIR.mkdir(parents=True, exist_ok=True)
+    if not password:
+        paths.MAIL_PASSWORD_FILE.unlink(missing_ok=True)
+        return
+    paths.MAIL_PASSWORD_FILE.write_text(password + "\n", encoding="utf-8")
+    os.chmod(paths.MAIL_PASSWORD_FILE, 0o600)
 
 
 def source_file() -> Path:
@@ -147,7 +182,19 @@ def load() -> Config:
         push=bool(raw.get("push", False)),
         max_diff_chars=int(raw.get("max_diff_chars", DEFAULT_MAX_DIFF_CHARS)),
         report_author=str(raw.get("report_author", "")),
+        mail=_mail(raw.get("mail") or {}),
         repos=[_repo_entry(item) for item in raw.get("repos", [])],
+    )
+
+
+def _mail(raw: dict) -> MailConfig:
+    return MailConfig(
+        host=str(raw.get("host", "")),
+        port=int(raw.get("port", 587)),
+        security=str(raw.get("security", "starttls")),
+        username=str(raw.get("username", "")),
+        password=read_mail_password(),
+        sender=str(raw.get("sender", "")),
     )
 
 
@@ -172,13 +219,15 @@ def load_or_default() -> Config:
 
 
 def save(config: Config, path: Path | None = None) -> Path:
-    """Write the config atomically, keeping the API key out of the file."""
+    """Write the config atomically, keeping the API key and the mail password out of the file."""
     target = path or write_target()
     target.parent.mkdir(parents=True, exist_ok=True)
 
     document = asdict(config)
     document["llm"]["api_key"] = ""
+    document["mail"]["password"] = ""
     write_api_key(config.llm.api_key)
+    write_mail_password(config.mail.password)
 
     tmp = target.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

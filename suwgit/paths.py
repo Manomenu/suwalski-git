@@ -23,6 +23,8 @@ LOG_FILE = STATE_DIR / "suwgit.log"
 LOCK_DIR = STATE_DIR / "locks"
 # The vLLM key never goes into the dotfiles repo — it stays here, chmod 600.
 API_KEY_FILE = STATE_DIR / "api_key"
+# The mailbox password `suwgit report --mail` sends with, kept out of the config for the same reason.
+MAIL_PASSWORD_FILE = STATE_DIR / "mail_password"
 # Which repositories ever got a B2B commit for which tenant, so a report knows
 # where to look. An index only: the commits themselves are the record.
 TENANTS_FILE = STATE_DIR / "tenants.json"
