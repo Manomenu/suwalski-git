@@ -41,14 +41,17 @@ suwgit report --tenant lokum
 
 ![The first page of an example work report](docs/report-example.png)
 
-Each entry shows when the work was done, a short summary, the work behind it,
-and the commit that proves it. By default the report covers the last 30 days
+Each project opens with a short summary of what the period achieved, written
+by the AI model from the work in the report. Then each entry shows when the
+work was done, a short summary, the work behind it, and the commit that proves
+it. By default the report covers the last 30 days
 and shows days only:
 
 | option | what it does |
 |---|---|
 | `--from 2026-09-13 --to 2026-10-13` | any range, both days included; dates as `YYYY-MM-DD` |
 | `--time` | add the hours of every piece of work |
+| `--no-summary` | leave out the project summaries: faster, and works without the AI server |
 | `-o ~/invoices/` | where to save it: a file or a folder (default: the current folder, as `lokum--<today>.pdf`) |
 | `--format json` | print the report as JSON instead, for scripts: `suwgit report --tenant lokum --format json \| jq` |
 

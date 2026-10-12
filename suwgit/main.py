@@ -15,6 +15,7 @@ from pathlib import Path
 from . import b2b, daemon, gitops, initcmd, install, logs, paths, report, tenants, uninstall
 from . import config as config_module
 from .committer import commit_repo
+from .llm import LlmUnavailable, summarize_project
 
 BOLD = "\033[1m"
 DIM = "\033[2m"
@@ -290,6 +291,29 @@ def _report_author() -> str:
         return ""
 
 
+def _project_summaries(entries: list[b2b.Entry], first: date, last: date) -> dict[str, str]:
+    """A summary per project from the model; a project it cannot summarise gets none.
+
+    Progress and failures go to stderr: with --format json, stdout is the JSON
+    and nothing else.
+    """
+    try:
+        llm_config = config_module.load().llm
+    except config_module.ConfigError as exc:
+        print(f"{DIM}no project summaries: {exc}{RESET}", file=sys.stderr)
+        return {}
+
+    summaries = {}
+    for name, items in report.by_project(entries).items():
+        print(f"{DIM}summarising {name} with {llm_config.model or 'the model'}…{RESET}", file=sys.stderr)
+        work = [(f"{e.start.astimezone():%Y-%m-%d}", e.summary or e.title, e.work_scope) for e in items]
+        try:
+            summaries[name] = summarize_project(llm_config, name, first.isoformat(), last.isoformat(), work)
+        except LlmUnavailable as exc:
+            print(f"  {RED}!{RESET} {name}: no project summary — {exc}", file=sys.stderr)
+    return summaries
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     today = date.today()
     last = args.to or today
@@ -303,12 +327,15 @@ def cmd_report(args: argparse.Namespace) -> int:
         return _fail(f"no repository has ever had a B2B commit for {args.tenant} (index: {paths.TENANTS_FILE})")
 
     entries = b2b.collect(repos, args.tenant, first, last)
+    summaries = {} if args.no_summary or not entries else _project_summaries(entries, first, last)
     if args.format == "json":
         # stdout carries the JSON and nothing else, so it pipes into jq; an empty
         # range is still a valid answer there, not an error.
         if args.output:
             return _fail("-o is for the PDF — send the JSON to a file with  > report.json")
-        document = report.as_json(entries, args.tenant, first, last, datetime.now().astimezone(), author=_report_author())
+        document = report.as_json(
+            entries, args.tenant, first, last, datetime.now().astimezone(), author=_report_author(), summaries=summaries
+        )
         print(json.dumps(document, indent=2, ensure_ascii=False))
         return 0
     if not entries:
@@ -322,7 +349,17 @@ def cmd_report(args: argparse.Namespace) -> int:
     target = target.resolve()
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(report.build(entries, first, last, datetime.now().astimezone(), with_time=args.time, author=_report_author()))
+        target.write_bytes(
+            report.build(
+                entries,
+                first,
+                last,
+                datetime.now().astimezone(),
+                with_time=args.time,
+                author=_report_author(),
+                summaries=summaries,
+            )
+        )
     except OSError as exc:
         return _fail(f"cannot write {target}: {exc}")
     projects = sorted({e.project for e in entries})
@@ -401,7 +438,11 @@ project. Only commits under your own git user.email count, so a colleague's work
 in a shared repository is left out. Nothing is stored: it is all read from git.
 
 The tenant itself is not printed in the PDF; the client sees project names.
-A commit counts when its work started within --from .. --to, both days included."""
+A commit counts when its work started within --from .. --to, both days included.
+
+Each project opens with a short summary of the period, written by the LLM from
+the commits in the report. Without the server the report is still made, only
+without them; --no-summary skips them on purpose."""
 
 REPORT_EXAMPLES = """\
 examples:
@@ -487,6 +528,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report_cmd.add_argument("--to", metavar="DATE", type=_day, help="last day, inclusive, YYYY-MM-DD (default: today)")
     report_cmd.add_argument("--time", action="store_true", help="show the hours of every work period, not only the days")
+    report_cmd.add_argument(
+        "--no-summary",
+        action="store_true",
+        help="skip the model's summary of each project — faster, and works without the LLM server",
+    )
     report_cmd.add_argument(
         "--format",
         choices=("pdf", "json"),

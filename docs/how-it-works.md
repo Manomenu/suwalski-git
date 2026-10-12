@@ -168,7 +168,16 @@ defaults, and never asks.
    `git log --all --author=<your user.email>`, so work on unmerged branches
    counts and colleagues' commits in a shared repository do not.
 3. Commits are parsed back with `b2b.parse`, filtered by tenant and by the day
-   their work started (both ends of the range included), and grouped by project.
+   their work started (both ends of the range included), and grouped by
+   project. A commit is counted once even when two listed paths share it, as
+   two worktrees of one repository do.
+4. Each project gets a summary from the model: one more request per project,
+   with the day, Summary and Work-Scope of each of its entries — nothing else,
+   no code, no diff. The prompt asks for 2–4 plain sentences on what the period
+   achieved, grouped by theme, using only what the entries say. Past 40,000
+   characters of input the oldest entries are left out, and the model is told
+   so. A model that cannot be reached leaves the summaries out with a warning on
+   stderr; the report is made all the same. `--no-summary` skips the step.
 
 The PDF is written by hand in `report.py` instead of with a library: the text
 uses Helvetica in WinAnsi encoding, one of the fonts every PDF reader has built
@@ -179,7 +188,8 @@ and Western European text; Polish letters need an embedded font, which is on the
 
 `--format json` prints the same report to stdout instead of writing a PDF —
 stdout then holds the JSON and nothing else, so it pipes into `jq`. It carries
-what tooling needs on top of the PDF: the tenant, each commit's technical title,
+what tooling needs on top of the PDF — each project's `summary` as in the PDF,
+plus the tenant, each commit's technical title,
 full hash, repository path and exact Work-Period start and end with their UTC
 offset. An empty range is an empty `projects` list, not an error.
 
@@ -192,6 +202,7 @@ offset. An empty range is an empty `projects` list, not an error.
   "projects": [
     {
       "name": "Lokum Shop",
+      "summary": "This period, the shop gained a checkout where customers pay for their order directly.",
       "entries": [
         {
           "work_period": {"start": "2026-10-12T09:14+02:00", "end": "2026-10-12T11:04+02:00"},
