@@ -638,3 +638,14 @@ def test_json_report_refuses_an_output_file(sandbox, tmp_path, capsys):
     tenants.record("lokum", _repo(tmp_path / "repo"))
     assert main.main(["report", "--tenant", "lokum", "--format", "json", "-o", str(tmp_path / "r.json")]) == 1
     assert capsys.readouterr().out == ""
+
+
+def test_a_prefix_leads_the_title_of_a_b2b_commit(sandbox, tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    monkeypatch.setattr(committer, "suggest_commit_message", _suggest)
+
+    committer.commit_repo(_config(), repo, prefix="EH-3311111", tenant="lokum")
+
+    entry = b2b.parse(_message(repo), repo, "x")
+    assert entry.title == "EH-3311111 [feature,bugfix] added csv export and fixed main tab"
+    assert entry.summary == SUMMARY

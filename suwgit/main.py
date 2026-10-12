@@ -239,7 +239,7 @@ def cmd_commit(args: argparse.Namespace) -> int:
                 f"nothing committed — name it instead:  suwgit {args.command} --b2b <tenant> --project <name>   (-y skips this question)"
             )
     print(f"{DIM}asking {config.llm.model or 'the model'} about {root}…{RESET}")
-    result = commit_repo(config, root, push=push, tenant=tenant, project=project)
+    result = commit_repo(config, root, push=push, prefix=args.prefix.strip(), tenant=tenant, project=project)
     if tenant and result.committed:
         try:
             tenants.remember(root, tenant, project)
@@ -391,6 +391,28 @@ def _b2b_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
+REPORT_DESCRIPTION = """\
+Build a work report for one client (tenant) from your B2B commits.
+
+A tenant can span many projects and repositories. The report gathers every B2B
+commit made for --tenant, in every repository where one was ever made for it
+(registered or not, on any branch), and groups them by project — one section per
+project. Only commits under your own git user.email count, so a colleague's work
+in a shared repository is left out. Nothing is stored: it is all read from git.
+
+The tenant itself is not printed in the PDF; the client sees project names.
+A commit counts when its work started within --from .. --to, both days included."""
+
+REPORT_EXAMPLES = """\
+examples:
+  suwgit report --tenant lokum                          last 30 days, PDF in the current folder
+  suwgit report --tenant lokum --from 2026-09-01 --to 2026-09-30 -o ~/invoices/
+  suwgit report --tenant lokum --time                   with the hours of every work period
+  suwgit report --tenant lokum --format json | jq '.projects[].name'
+
+see the tenants you have, and their repositories and projects:  suwgit list"""
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="suwgit",
@@ -432,6 +454,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     commit = sub.add_parser("commit", help="commit the closest repository above a path, right now")
     commit.add_argument("path", nargs="?", default=".")
+    commit.add_argument("-p", "--prefix", default="", help="put this in front of the message, e.g. a ticket id: -p EH-3311111")
     push_choice = commit.add_mutually_exclusive_group()
     push_choice.add_argument("--push", action="store_true", default=None, help="push afterwards, whatever the config says")
     push_choice.add_argument("--no-push", dest="push", action="store_false", help="commit only, whatever the config says")
@@ -441,14 +464,28 @@ def build_parser() -> argparse.ArgumentParser:
     # The same thing with the push forced on, for when that is what you mean.
     push_cmd = sub.add_parser("push", help="commit and push the closest repository above a path")
     push_cmd.add_argument("path", nargs="?", default=".")
+    push_cmd.add_argument("-p", "--prefix", default="", help="put this in front of the message, e.g. a ticket id: -p EH-3311111")
     _b2b_options(push_cmd)
     push_cmd.set_defaults(func=cmd_commit, push=True, force_push=True)
 
-    report_cmd = sub.add_parser("report", help="a PDF of your B2B commits for one tenant in a date range")
-    report_cmd.add_argument("--tenant", required=True, type=_tenant, help="the client, as given to --b2b")
-    report_cmd.add_argument(
-        "--from", dest="since", type=_day, help=f"first day, YYYY-MM-DD (default: the last {REPORT_DAYS} days up to --to)"
+    report_cmd = sub.add_parser(
+        "report",
+        help="a PDF of your B2B commits for one tenant in a date range",
+        description=REPORT_DESCRIPTION,
+        epilog=REPORT_EXAMPLES,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    report_cmd.add_argument(
+        "--tenant", required=True, type=_tenant, help="the client, as given to --b2b; the report covers all of its projects"
+    )
+    report_cmd.add_argument(
+        "--from",
+        dest="since",
+        metavar="DATE",
+        type=_day,
+        help=f"first day, YYYY-MM-DD (default: the last {REPORT_DAYS} days up to --to)",
+    )
+    report_cmd.add_argument("--to", metavar="DATE", type=_day, help="last day, inclusive, YYYY-MM-DD (default: today)")
     report_cmd.add_argument("--time", action="store_true", help="show the hours of every work period, not only the days")
     report_cmd.add_argument(
         "--format",
@@ -456,10 +493,10 @@ def build_parser() -> argparse.ArgumentParser:
         default="pdf",
         help="pdf writes a file (default); json prints the report to stdout, for jq",
     )
-    report_cmd.add_argument("--to", type=_day, help="last day, inclusive, YYYY-MM-DD (default: today)")
     report_cmd.add_argument(
         "-o",
         "--output",
+        metavar="PATH",
         help="the PDF file, or a folder to put it in (default: <tenant>--<today>.pdf in the current folder)",
     )
     report_cmd.set_defaults(func=cmd_report)

@@ -37,6 +37,7 @@ def commit_repo(
     root: Path,
     push: bool | None = None,
     quiet_seconds: float = 0.0,
+    prefix: str = "",
     tenant: str = "",
     project: str = "",
 ) -> Result:
@@ -63,6 +64,9 @@ def commit_repo(
     suwgit committed, or you committed by hand.
 
     `push` overrides the config for this one call; None means follow the config.
+    `prefix` goes in front of the model's message as given — a ticket id such as
+    `EH-3311111` — so the history links to the tracker without asking the model
+    to copy a string it might mangle.
     A failed push never undoes the commit: the work is safe locally either way,
     and the next sweep pushes it along with whatever comes next.
 
@@ -107,10 +111,11 @@ def commit_repo(
                     repolog.record_blocker(root, f"refused to commit — possible secret in the changes: {reason}")
                     return Result(root, False, f"possible secret in the changes: {reason}", unsafe=True)
 
-                message = suggestion.message
+                title = f"{prefix} {suggestion.message}" if prefix else suggestion.message
+                message = title
                 if tenant:
                     start, end = b2b_format.work_period(gitops.change_times(root, tree.status), time.time())
-                    message = b2b_format.compose(message, suggestion.summary, suggestion.work_scope, project_name, tenant, start, end)
+                    message = b2b_format.compose(title, suggestion.summary, suggestion.work_scope, project_name, tenant, start, end)
                 commit = gitops.commit_all(root, message)
                 if tenant:
                     try:
@@ -118,7 +123,7 @@ def commit_repo(
                     except OSError as exc:
                         # The commit is the record; the index only speeds up finding it.
                         log.warning("%s: committed, but could not note it in the tenant index (%s)", root, exc)
-                log.info("%s: committed %s %s", root, commit, suggestion.message)
+                log.info("%s: committed %s %s", root, commit, title)
                 repolog.clear(root)
                 result = Result(root, True, "committed", message=message, commit=commit)
             else:

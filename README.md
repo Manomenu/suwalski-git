@@ -22,6 +22,8 @@ them into a PDF report.
   It waits while you are still editing.
 - **Messages worth reading.** Each commit says what changed, labelled `feature`,
   `bugfix`, `refactor` and so on, so you can find anything later.
+- **Ticket ids where your team needs them.** Put a YouTrack or Jira task id in
+  front of the commit title with one flag.
 - **Proof of work for clients.** Mark a commit as client work and it records
   what was done, for which project and when, written for the client rather
   than for developers.
@@ -108,6 +110,23 @@ If a repository mixes client work with your own, register it with
 `--no-auto-commit` and commit by hand. Then only what you mark with `--b2b`
 counts as the client's.
 
+## Ticket ids in commit titles
+
+If your team requires every commit to name its task from YouTrack, Jira or
+another tracker, add it with `-p` / `--prefix`:
+
+```console
+$ suwgit push -p EH-3311111
+✓ /home/you/projects/dashboard  99f8156
+  EH-3311111 [feature] added csv export for revenue chart
+  pushed master
+```
+
+The id goes in front of the title exactly as you typed it. The AI model never
+sees it, so it cannot get it wrong. The tracker links the commit to the task as
+usual. It works together with `--b2b`, and the background service adds no
+prefix.
+
 ## Install
 
 You need Linux with systemd, Python 3.12+, git, and a
@@ -138,7 +157,7 @@ suwgit list
 | `suwgit register <folder>` | watch a repository; run again to change its settings: `--default-b2b <tenant>`, `--default-project <name>`, `--no-auto-commit` |
 | `suwgit unregister <folder>` | stop watching it |
 | `suwgit list` | the setup, every repository and whether it has changes, and every client as `tenant, folder (project)` |
-| `suwgit commit [path]` | commit now; `--b2b [tenant]` / `--project [name]` for client work, `-y` to skip the question, `--push` / `--no-push` |
+| `suwgit commit [path]` | commit now; `-p <ticket>` for a task id, `--b2b [tenant]` / `--project [name]` for client work, `-y` to skip the question, `--push` / `--no-push` |
 | `suwgit push [path]` | commit now and push |
 | `suwgit report --tenant <tenant>` | the PDF report; see [above](#the-report) |
 | `suwgit logs [-n N] [-f]` | what the background service did |

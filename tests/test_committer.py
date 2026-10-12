@@ -94,3 +94,34 @@ def test_a_sweep_reports_commits_and_pushes_separately(sandbox, tmp_path, monkey
     monkeypatch.setattr(config_module, "load", lambda: Config(repos=[RepoEntry(str(repo))]))
 
     assert daemon.run_once() == (0, 0, 0)
+
+
+def test_a_prefix_goes_in_front_of_the_message(sandbox, tmp_path, monkeypatch):
+    """`suwgit push -p EH-3311111` — the ticket id leads, the model's message follows."""
+    repo = _repo(tmp_path / "repo")
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree, **_: Suggestion("[feature] example"))
+
+    result = committer.commit_repo(_config(), repo, prefix="EH-3311111")
+
+    assert result.message == "EH-3311111 [feature] example"
+    log = subprocess.run(["git", "-C", str(repo), "log", "-1", "--format=%s"], capture_output=True, text=True, check=True)
+    assert log.stdout.strip() == "EH-3311111 [feature] example"
+
+
+def test_the_prefix_reaches_the_cli(sandbox, tmp_path, monkeypatch):
+    from suwgit import config as config_module
+    from suwgit import main
+
+    repo = _repo(tmp_path / "repo")
+    seen = {}
+    monkeypatch.setattr(config_module, "load", _config)
+    monkeypatch.setattr(
+        main,
+        "commit_repo",
+        lambda cfg, root, push, prefix, **_: seen.update(prefix=prefix, push=push) or committer.Result(root, False, "x"),
+    )
+
+    main.main(["push", "-p", "EH-3311111", str(repo)])
+    assert seen == {"prefix": "EH-3311111", "push": True}
+    main.main(["commit", "--prefix", "EH-1", str(repo)])
+    assert seen["prefix"] == "EH-1"
