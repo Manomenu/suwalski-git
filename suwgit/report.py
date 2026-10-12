@@ -131,14 +131,19 @@ class _Document:
         return bytes(out)
 
 
-def _period(entry: Entry) -> str:
+def _period(entry: Entry, with_time: bool) -> str:
+    """The day, or the span of days; with `with_time`, down to the minute."""
     start, end = entry.start.astimezone(), entry.end.astimezone()
+    if not with_time:
+        if start.date() == end.date():
+            return f"{start:%Y-%m-%d}"
+        return f"{start:%Y-%m-%d} – {end:%Y-%m-%d}"
     if start.date() == end.date():
         return f"{start:%Y-%m-%d}  {start:%H:%M} – {end:%H:%M}"
     return f"{start:%Y-%m-%d %H:%M} – {end:%Y-%m-%d %H:%M}"
 
 
-def _entry_rows(entry: Entry, width: float) -> list[tuple[str, list[str], str]]:
+def _entry_rows(entry: Entry, width: float, with_time: bool) -> list[tuple[str, list[str], str]]:
     """(label, wrapped lines, font) for one commit block."""
     body = width - LABEL_WIDTH
     scope = []
@@ -146,7 +151,7 @@ def _entry_rows(entry: Entry, width: float) -> list[tuple[str, list[str], str]]:
         wrapped = wrap(item, REGULAR, BODY_SIZE, body - 12)
         scope += [f"•  {wrapped[0]}"] + [f"    {line}" for line in wrapped[1:]]
     return [
-        ("Work period", [_period(entry)], BOLD),
+        ("Work period", [_period(entry, with_time)], BOLD),
         # The client-facing summary; the technical title only stands in for a
         # commit written before summaries existed.
         ("Summary", wrap(entry.summary or entry.title, REGULAR, BODY_SIZE, body), REGULAR),
@@ -155,8 +160,12 @@ def _entry_rows(entry: Entry, width: float) -> list[tuple[str, list[str], str]]:
     ]
 
 
-def build(entries: list[Entry], first: date, last: date, generated: datetime) -> bytes:
-    """The whole report as PDF bytes. `entries` come sorted by project, then time."""
+def build(entries: list[Entry], first: date, last: date, generated: datetime, with_time: bool = False) -> bytes:
+    """The whole report as PDF bytes. `entries` come sorted by project, then time.
+
+    Days only by default; `with_time` adds the hours and minutes of every work
+    period, and the timezone they are in.
+    """
     doc = _Document()
     width = PAGE_WIDTH - 2 * MARGIN
     span = f"{first:%Y-%m-%d} – {last:%Y-%m-%d}"
@@ -166,12 +175,14 @@ def build(entries: list[Entry], first: date, last: date, generated: datetime) ->
     doc.y -= 8
     doc.text(MARGIN, "Work report", BOLD, 22)
     doc.y -= 26
-    for label, value in (
+    header = [
         ("Period", span),
         ("Prepared by", ", ".join(authors) or "—"),
-        ("Generated", f"{generated:%Y-%m-%d %H:%M}"),
-        ("Times", f"local time, UTC{offset[:3]}:{offset[3:]}"),
-    ):
+        ("Generated", f"{generated:%Y-%m-%d %H:%M}" if with_time else f"{generated:%Y-%m-%d}"),
+    ]
+    if with_time:
+        header.append(("Times", f"local time, UTC{offset[:3]}:{offset[3:]}"))
+    for label, value in header:
         doc.text(MARGIN, label, gray=MUTED)
         doc.text(MARGIN + LABEL_WIDTH, value)
         doc.y -= LEADING
@@ -207,7 +218,7 @@ def build(entries: list[Entry], first: date, last: date, generated: datetime) ->
         doc.y -= 20
 
         for entry in items:
-            rows = _entry_rows(entry, width)
+            rows = _entry_rows(entry, width, with_time)
             height = sum(len(lines) for _, lines, _ in rows) * LEADING + 16
             doc.room(height)
             for label, lines, font in rows:

@@ -555,3 +555,41 @@ def test_list_shows_every_tenant_with_its_folders_and_projects(sandbox, monkeypa
     out = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
     plain = [line.strip() for line in out.split("tenants\n")[1].splitlines() if line.strip()]
     assert plain == ["acme, shared (Acme CRM)", "lokum, api", "lokum, shared", "lokum, shop (Lokum Shop)"]
+
+
+def _entry(start, end):
+    return b2b.Entry(Path("/r/shop"), "abc", "Test", "[feature] x", "did x", "shop", "lokum", start, end, ["did x"])
+
+
+def test_the_report_shows_days_by_default_and_hours_with_time():
+    one_day = _entry(datetime(2026, 10, 12, 9, 14).astimezone(), datetime(2026, 10, 12, 11, 4).astimezone())
+    two_days = _entry(datetime(2026, 10, 12, 23, 30).astimezone(), datetime(2026, 10, 13, 1, 15).astimezone())
+
+    assert report._period(one_day, with_time=False) == "2026-10-12"
+    assert report._period(two_days, with_time=False) == "2026-10-12 – 2026-10-13"
+    assert report._period(one_day, with_time=True) == "2026-10-12  09:14 – 11:04"
+    assert report._period(two_days, with_time=True) == "2026-10-12 23:30 – 2026-10-13 01:15"
+
+    generated = datetime(2026, 10, 13, 8, 0).astimezone()
+    days = report.build([one_day], date(2026, 10, 1), date(2026, 10, 13), generated)
+    hours = report.build([one_day], date(2026, 10, 1), date(2026, 10, 13), generated, with_time=True)
+    assert b"09:14" not in days and b"Times" not in days and b"08:00" not in days
+    assert b"09:14" in hours and b"Times" in hours
+
+
+def test_report_time_flag_parses(sandbox):
+    assert main.build_parser().parse_args(["report", "--tenant", "lokum"]).time is False
+    assert main.build_parser().parse_args(["report", "--tenant", "lokum", "--time"]).time is True
+
+
+def test_a_report_of_the_same_name_is_overwritten(sandbox, tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    _b2b_commit(repo, "work", datetime.now().astimezone() - timedelta(minutes=5))
+    tenants.record("lokum", repo)
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / f"lokum--{date.today():%Y-%m-%d}.pdf"
+    target.write_bytes(b"an older report")
+
+    assert main.main(["report", "--tenant", "lokum"]) == 0
+    assert target.read_bytes().startswith(b"%PDF")
+    assert len(list(tmp_path.glob("lokum--*.pdf"))) == 1

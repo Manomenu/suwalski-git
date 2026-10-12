@@ -305,7 +305,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     target = target.resolve()
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(report.build(entries, first, last, datetime.now().astimezone()))
+        target.write_bytes(report.build(entries, first, last, datetime.now().astimezone(), with_time=args.time))
     except OSError as exc:
         return _fail(f"cannot write {target}: {exc}")
     projects = sorted({e.project for e in entries})
@@ -432,6 +432,7 @@ def build_parser() -> argparse.ArgumentParser:
     report_cmd.add_argument(
         "--from", dest="since", type=_day, help=f"first day, YYYY-MM-DD (default: the last {REPORT_DAYS} days up to --to)"
     )
+    report_cmd.add_argument("--time", action="store_true", help="show the hours of every work period, not only the days")
     report_cmd.add_argument("--to", type=_day, help="last day, inclusive, YYYY-MM-DD (default: today)")
     report_cmd.add_argument(
         "-o",

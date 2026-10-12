@@ -69,7 +69,7 @@ suwgit list
 | `suwgit list` | config, service state, which repositories are dirty, and every tenant as `tenant, folder (project)` |
 | `suwgit commit [path]` | commit the closest repository above `path` now, and print the message (`--push` / `--no-push` override the config for one run; `--b2b [tenant]` and `--project [name]` make it a B2B commit, `-y` skips the confirmation) |
 | `suwgit push [path]` | the same thing with the push forced on |
-| `suwgit report --tenant <tenant>` | a PDF of your B2B commits for one client (`--from` / `--to` as `YYYY-MM-DD`, default: the last 30 days, today included; `-o` for a file or a folder, default: the current folder) |
+| `suwgit report --tenant <tenant>` | a PDF of your B2B commits for one client (`--from` / `--to` as `YYYY-MM-DD`, default: the last 30 days, today included; `--time` adds the hours; `-o` for a file or a folder, default: the current folder) |
 | `suwgit logs [-n N] [-f]` | the daemon log, through [`bat`](https://github.com/sharkdp/bat) if you have it |
 | `suwgit daemon [--once]` | the loop systemd runs |
 | `suwgit uninstall [--purge]` | remove it from `PATH`, systemd and its logs; **keeps your config** unless `--purge` |
@@ -209,7 +209,9 @@ This writes `lokum--<today>.pdf` (e.g. `lokum--2026-10-13.pdf`) in the current
 folder, or wherever `-o` points, a file or a folder. It holds a title block, a
 summary per project, then each project's commits, each with its Work period,
 Summary, Work scope and commit hash. All of it is client-facing; the
-technical title is left out. The second and every later project start
+technical title is left out. A Work period shows the day, or the span of days
+when the work ran past midnight; add `--time` for the hours and minutes as
+well. The second and every later project start
 on a new page. Dates are ISO only, because `9/10/2026` means a different
 month depending on who reads it. A commit counts when its work started within
 the range, both ends included.
