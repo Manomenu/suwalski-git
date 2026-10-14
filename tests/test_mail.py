@@ -76,6 +76,18 @@ def test_a_config_with_one_mailbox_as_mail_still_loads(sandbox):
     assert [b.sender for b in config.load().mailboxes] == ["me@gmail.com"]
 
 
+def test_the_password_of_the_one_mailbox_version_is_still_found(sandbox):
+    """It kept the password in a file of its own, `mail_password`, until the config is saved again."""
+    paths.CONFIG_FILE.parent.mkdir(parents=True)
+    paths.CONFIG_FILE.write_text('{"mail": {"host": "smtp.gmail.com", "sender": "me@gmail.com"}, "repos": []}')
+    paths.STATE_DIR.mkdir(parents=True)
+    (paths.STATE_DIR / "mail_password").write_text("old s3cret\n")
+
+    assert [b.password for b in config.load().mailboxes] == ["old s3cret"]
+    config.save(config.load())
+    assert config.read_mail_passwords() == {"me@gmail.com": "old s3cret"}
+
+
 def test_add_replaces_the_same_sender_and_remove_forgets_it(sandbox):
     cfg = _config(WORK)
     assert config.add_mailbox(cfg, MailConfig(host="smtp.gmail.com", sender="me@gmail.com")) == "added"

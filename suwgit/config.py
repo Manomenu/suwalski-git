@@ -190,6 +190,12 @@ def _mailboxes(raw: dict) -> list[MailConfig]:
             sender=str(item.get("sender", "")),
         )
         box.password = passwords.get(box.sender, "")
+        if not box.password and "mailboxes" not in raw:
+            # Saved by the version with one mailbox, in a file of its own.
+            try:
+                box.password = (paths.STATE_DIR / "mail_password").read_text(encoding="utf-8").rstrip("\n")
+            except OSError:
+                pass
         if box.is_configured:
             boxes.append(box)
     return boxes
