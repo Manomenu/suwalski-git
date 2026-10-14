@@ -120,13 +120,21 @@ def compose(
     start: datetime,
     end: datetime,
     work_id: str = "",
+    notes: str = "",
 ) -> str:
-    """The full B2B commit message. A `work_id` (see `new_work_id`) is added as a trailer."""
+    """The full B2B commit message. A `work_id` (see `new_work_id`) is added as a trailer.
+
+    `notes` — the how-to-test and how-to-review checklists of `-i` — go between
+    the work scope and the trailers: the trailers must stay the last paragraph
+    for git to read them as trailers, and the report reads the scope up to its
+    first line that is not an item.
+    """
     scope = "\n".join(f"- {item}" for item in work_scope)
     trailers = f"{PROJECT}: {project}\n{TENANT}: {tenant}\n{WORK_PERIOD}: {format_period(start, end)}"
     if work_id:
         trailers += f"\n{WORK_ID}: {work_id}"
-    return f"{title}\n\n{SUMMARY}: {summary}\n\n{WORK_SCOPE}:\n{scope}\n\n{trailers}"
+    notes = f"{notes}\n\n" if notes else ""
+    return f"{title}\n\n{SUMMARY}: {summary}\n\n{WORK_SCOPE}:\n{scope}\n\n{notes}{trailers}"
 
 
 def parse_period(text: str) -> tuple[datetime, datetime] | None:

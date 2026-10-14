@@ -14,7 +14,7 @@ from pathlib import Path
 from . import b2b as b2b_format
 from . import gitops, repolog, tenants
 from .config import Config
-from .llm import LlmUnavailable, suggest_commit_message
+from .llm import LlmUnavailable, review_notes, suggest_commit_message
 from .locking import Busy, repo_lock
 from .logs import logger
 
@@ -42,8 +42,9 @@ def commit_repo(
     prefix: str = "",
     tenant: str = "",
     project: str = "",
-    instructions: str = "",
+    hint: str = "",
     push_anyway: bool = False,
+    review: bool = False,
 ) -> Result:
     """Commit everything in `root` under an LLM-written message, then push it.
 
@@ -80,8 +81,11 @@ def commit_repo(
     defaults to the folder name. `suwgit commit` and `push` pass these for
     `--b2b`; the daemon passes the repository's defaults.
 
-    `instructions` go to the model with the diff, to steer what the message
+    `hint` goes to the model with the diff, to steer what the message
     says; only `suwgit commit` and `push` have any.
+
+    `review` is `-i`: the message also says how to test the change and how
+    to review it, as two checklists for the merge request.
 
     `push_anyway` is `suwgit push` asked for by hand: a clean tree is then
     pushed exactly as `git push` would, whether or not anything looks pending —
@@ -117,7 +121,7 @@ def commit_repo(
                 # and the report marks the undone work. The model is still
                 # asked, for the secret check — an undo can bring one back.
                 undoes = gitops.exact_revert_of(root)
-                suggestion = suggest_commit_message(config.llm, tree, b2b=bool(tenant) and not undoes, instructions=instructions)
+                suggestion = suggest_commit_message(config.llm, tree, b2b=bool(tenant) and not undoes, hint=hint, review=review)
 
                 if suggestion.unsafe:
                     # Refusing is the whole point: a secret in a git history is
@@ -129,17 +133,26 @@ def commit_repo(
                     return Result(root, False, f"possible secret in the changes: {reason}", unsafe=True)
 
                 title = f"{prefix} {suggestion.message}" if prefix else suggestion.message
-                message = title
+                notes = review_notes(suggestion.how_to_test, suggestion.how_to_review)
+                message = f"{title}\n\n{notes}" if notes else title
                 if undoes:
                     title = f'Revert "{undoes[1]}"'
                     title = f"{prefix} {title}" if prefix else title
-                    message = f"{title}\n\nThis reverts commit {undoes[0]}."
+                    message = f"{title}\n\nThis reverts commit {undoes[0]}." + (f"\n\n{notes}" if notes else "")
                     if tenant:
                         log.info("%s: the changes undo %s, committed as its revert rather than as B2B work", root, undoes[0][:10])
                 elif tenant:
                     start, end = b2b_format.work_period(gitops.change_times(root, tree.status), time.time())
                     message = b2b_format.compose(
-                        title, suggestion.summary, suggestion.work_scope, project_name, tenant, start, end, b2b_format.new_work_id()
+                        title,
+                        suggestion.summary,
+                        suggestion.work_scope,
+                        project_name,
+                        tenant,
+                        start,
+                        end,
+                        b2b_format.new_work_id(),
+                        notes=notes,
                     )
                 commit = gitops.commit_all(root, message)
                 if tenant and not undoes:

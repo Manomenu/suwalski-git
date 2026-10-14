@@ -259,20 +259,20 @@ def _confirm(question: str, default: bool = True) -> bool:
     return answer in ("y", "yes", "t", "tak")
 
 
-def _path_and_instructions(args: argparse.Namespace) -> tuple[str, str]:
-    """`suwgit push "say it is a hotfix"` means the current folder, with instructions.
+def _path_and_hint(args: argparse.Namespace) -> tuple[str, str]:
+    """`suwgit push "say it is a hotfix"` means the current folder, with a hint for the model.
 
     Both positionals are optional, so a lone quoted sentence lands in `path`.
     A path that does not exist and has a space in it is a sentence, not a typo.
     """
-    path, instructions = args.path, (args.instructions or "").strip()
-    if not instructions and " " in path.strip() and not Path(path).expanduser().exists():
+    path, hint = args.path, (args.hint or "").strip()
+    if not hint and " " in path.strip() and not Path(path).expanduser().exists():
         return ".", path.strip()
-    return path, instructions
+    return path, hint
 
 
 def cmd_commit(args: argparse.Namespace) -> int:
-    path, instructions = _path_and_instructions(args)
+    path, hint = _path_and_hint(args)
     try:
         root = gitops.find_repo_root(Path(path))
     except gitops.GitError as exc:
@@ -314,8 +314,9 @@ def cmd_commit(args: argparse.Namespace) -> int:
         prefix=prefix,
         tenant=tenant,
         project=project,
-        instructions=instructions,
+        hint=hint,
         push_anyway=push is True,
+        review=args.review,
     )
     if tenant and result.committed and not result.reverts:
         try:
@@ -611,7 +612,14 @@ def _tenant(text: str) -> str:
         raise argparse.ArgumentTypeError(str(exc)) from None
 
 
-def _prefix_option(parser: argparse.ArgumentParser) -> None:
+def _message_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "-i",
+        "--instructions",
+        dest="review",
+        action="store_true",
+        help="add how to test the change and how to review it to the message, as two checklists for the merge request",
+    )
     parser.add_argument(
         "-p",
         "--prefix",
@@ -731,11 +739,11 @@ def build_parser() -> argparse.ArgumentParser:
     commit = sub.add_parser("commit", help="commit the closest repository above a path, right now")
     commit.add_argument("path", nargs="?", default=".")
     commit.add_argument(
-        "instructions",
+        "hint",
         nargs="?",
         help='your own words for the model on what the message should say, e.g. "mention it is only the first half of EH-311"',
     )
-    _prefix_option(commit)
+    _message_options(commit)
     push_choice = commit.add_mutually_exclusive_group()
     push_choice.add_argument("--push", action="store_true", default=None, help="push afterwards, whatever the config says")
     push_choice.add_argument("--no-push", dest="push", action="store_false", help="commit only, whatever the config says")
@@ -746,11 +754,11 @@ def build_parser() -> argparse.ArgumentParser:
     push_cmd = sub.add_parser("push", help="commit and push the closest repository above a path")
     push_cmd.add_argument("path", nargs="?", default=".")
     push_cmd.add_argument(
-        "instructions",
+        "hint",
         nargs="?",
         help='your own words for the model on what the message should say, e.g. "mention it is only the first half of EH-311"',
     )
-    _prefix_option(push_cmd)
+    _message_options(push_cmd)
     _b2b_options(push_cmd)
     push_cmd.set_defaults(func=cmd_commit, push=True, force_push=True)
 
