@@ -125,3 +125,28 @@ def test_the_prefix_reaches_the_cli(sandbox, tmp_path, monkeypatch):
     assert seen == {"prefix": "EH-3311111", "push": True}
     main.main(["commit", "--prefix", "EH-1", str(repo)])
     assert seen["prefix"] == "EH-1"
+
+
+def test_instructions_are_passed_to_the_model(sandbox, tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    (repo / "a.txt").write_text("hi")
+    seen = {}
+
+    def suggest(cfg, tree, **kwargs):
+        seen.update(kwargs)
+        return Suggestion("[feature] added a")
+
+    monkeypatch.setattr(committer, "suggest_commit_message", suggest)
+
+    committer.commit_repo(_config(), repo, instructions="write it in Polish")
+    assert seen["instructions"] == "write it in Polish"
+
+
+def test_a_lone_sentence_is_instructions_for_the_current_folder():
+    from suwgit import main
+
+    args = main.build_parser().parse_args(["push", "say it is a hotfix"])
+    assert main._path_and_instructions(args) == (".", "say it is a hotfix")
+
+    args = main.build_parser().parse_args(["push", "../other", "say it is a hotfix", "-p", "EH-1"])
+    assert main._path_and_instructions(args) == ("../other", "say it is a hotfix")

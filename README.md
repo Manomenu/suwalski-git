@@ -138,6 +138,37 @@ sees it, so it cannot get it wrong. The tracker links the commit to the task as
 usual. It works together with `--b2b`, and the background service adds no
 prefix.
 
+## Your own words for the message
+
+After the path you can add a sentence in quotes for the AI model, to steer
+what the message says:
+
+```console
+$ suwgit push . "mention this is only the first half of the export, the rest comes tomorrow"
+$ suwgit commit "write the title in Polish"
+```
+
+Without a path, a quoted sentence means the current folder. The model still
+checks the changes for secrets, whatever the sentence says. With `--b2b`, the
+sentence steers the client's summary and work scope too.
+
+## Merge request link
+
+When `suwgit push` sends a branch other than the one everything merges into,
+it shows where to open a merge request for it:
+
+```console
+$ suwgit push
+✓ /home/you/projects/dashboard  4c1a2e0
+  [feature] added csv export for revenue chart
+  pushed feature/csv-export
+  merge request: https://gitlab.example.com/team/dashboard/-/merge_requests/new?merge_request%5Bsource_branch%5D=feature%2Fcsv-export
+```
+
+The link is the one GitLab, GitHub, Gitea or Bitbucket sends back after the
+push. On GitLab it leads to the open merge request once there is one. If the
+server sends no link, suwgit builds one for GitHub and GitLab.
+
 ## Install
 
 On Windows, use the
@@ -218,8 +249,8 @@ commit refused for a possible secret, and never force-pushes.
 | `suwgit register <folder>` | watch a repository; run again to change its settings: `--default-b2b <tenant>`, `--default-project <name>`, `--no-auto-commit` |
 | `suwgit unregister <folder>` | stop watching it |
 | `suwgit list` | the setup, every repository and whether it has changes, every client as `tenant, folder (project)`, and your mailboxes |
-| `suwgit commit [path]` | commit now; `-p <ticket>` for a task id, `--b2b [tenant]` / `--project [name]` for client work, `-y` to skip the question, `--push` / `--no-push` |
-| `suwgit push [path]` | commit now and push |
+| `suwgit commit [path] ["instructions"]` | commit now; `"…"` steers what the message says, `-p <ticket>` for a task id, `--b2b [tenant]` / `--project [name]` for client work, `-y` to skip the question, `--push` / `--no-push` |
+| `suwgit push [path] ["instructions"]` | commit now and push, then show the merge request link |
 | `suwgit report --tenant <tenant>` | the PDF report; see [above](#the-report) |
 | `suwgit add-mail [address]` / `remove-mail <address>` | add (or update) a mailbox reports can be sent from / forget one |
 | `suwgit logs [-n N] [-f]` | what the background service did |

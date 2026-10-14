@@ -227,3 +227,56 @@ def test_nothing_in_the_codebase_can_force_push():
         text = module.read_text()
         assert "--force" not in text, module
         assert "force-with-lease" not in text, module
+
+
+def test_the_servers_merge_request_link_is_passed_on():
+    output = (
+        "remote: \nremote: To create a merge request for feat, visit:\n"
+        "remote:   https://gitlab.example.com/team/app/-/merge_requests/new?merge_request%5Bsource_branch%5D=feat\n"
+        "remote: \nTo gitlab.example.com:team/app.git\n * [new branch]      feat -> feat\n"
+    )
+    url = gitops.merge_request_url(Path("/nowhere"), "origin", "feat", output)
+    assert url == "https://gitlab.example.com/team/app/-/merge_requests/new?merge_request%5Bsource_branch%5D=feat"
+
+
+@pytest.mark.parametrize(
+    "remote_url, web",
+    [
+        ("git@github.com:owner/repo.git", "https://github.com/owner/repo"),
+        ("https://github.com/owner/repo.git", "https://github.com/owner/repo"),
+        ("https://user@gitlab.example.com/group/sub/repo.git", "https://gitlab.example.com/group/sub/repo"),
+        ("ssh://git@gitlab.example.com:2222/group/repo.git", "https://gitlab.example.com/group/repo"),
+        ("/srv/git/repo.git", ""),
+    ],
+)
+def test_web_url_of_a_remote(remote_url, web):
+    assert gitops.web_url(remote_url) == web
+
+
+def test_a_quiet_github_still_gets_a_pull_request_link(tmp_path, repo_with_remote):
+    _, work = repo_with_remote
+    subprocess.run(["git", "-C", str(work), "remote", "set-url", "origin", "git@github.com:owner/repo.git"], check=True)
+    subprocess.run(["git", "-C", str(work), "update-ref", "refs/remotes/origin/feat/x", "HEAD"], check=True)
+
+    assert gitops.merge_request_url(work, "origin", "feat/x", "") == "https://github.com/owner/repo/pull/new/feat/x"
+
+
+def test_the_branch_everything_merges_into_gets_no_link(repo_with_remote):
+    _, work = repo_with_remote
+    subprocess.run(["git", "-C", str(work), "remote", "set-url", "origin", "git@github.com:owner/repo.git"], check=True)
+    branch = gitops.current_branch(work)
+
+    assert gitops.merge_request_url(work, "origin", branch, "") == ""
+
+
+def test_pushing_a_branch_reports_the_link(sandbox, repo_with_remote, monkeypatch):
+    _, work = repo_with_remote
+    subprocess.run(["git", "-C", str(work), "checkout", "-q", "-b", "feature"], check=True)
+    (work / "b.txt").write_text("more")
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree, **_: Suggestion("[feature] added b"))
+    monkeypatch.setattr(gitops, "web_url", lambda url: "https://gitlab.example.com/team/app")
+
+    result = committer.commit_repo(_config(push=True), work)
+
+    assert result.pushed.startswith("pushed feature")
+    assert result.merge_request_url == "https://gitlab.example.com/team/app/-/merge_requests/new?merge_request%5Bsource_branch%5D=feature"

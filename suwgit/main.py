@@ -258,9 +258,22 @@ def _confirm(question: str, default: bool = True) -> bool:
     return answer in ("y", "yes", "t", "tak")
 
 
+def _path_and_instructions(args: argparse.Namespace) -> tuple[str, str]:
+    """`suwgit push "say it is a hotfix"` means the current folder, with instructions.
+
+    Both positionals are optional, so a lone quoted sentence lands in `path`.
+    A path that does not exist and has a space in it is a sentence, not a typo.
+    """
+    path, instructions = args.path, (args.instructions or "").strip()
+    if not instructions and " " in path.strip() and not Path(path).expanduser().exists():
+        return ".", path.strip()
+    return path, instructions
+
+
 def cmd_commit(args: argparse.Namespace) -> int:
+    path, instructions = _path_and_instructions(args)
     try:
-        root = gitops.find_repo_root(Path(args.path))
+        root = gitops.find_repo_root(Path(path))
     except gitops.GitError as exc:
         return _fail(str(exc))
 
@@ -283,7 +296,7 @@ def cmd_commit(args: argparse.Namespace) -> int:
                 f"nothing committed — name it instead:  suwgit {args.command} --b2b <tenant> --project <name>   (-y skips this question)"
             )
     print(f"{DIM}asking {config.llm.model or 'the model'} about {root}…{RESET}")
-    result = commit_repo(config, root, push=push, prefix=args.prefix.strip(), tenant=tenant, project=project)
+    result = commit_repo(config, root, push=push, prefix=args.prefix.strip(), tenant=tenant, project=project, instructions=instructions)
     if tenant and result.committed and not result.reverts:
         try:
             tenants.remember(root, tenant, project)
@@ -312,6 +325,9 @@ def cmd_commit(args: argparse.Namespace) -> int:
         print(f"  the report marks that work as reverted{RESET}")
     if result.pushed:
         print(f"  {DIM}{result.pushed}{RESET}")
+    if result.merge_request_url:
+        kind = "pull request" if "/pull" in result.merge_request_url else "merge request"
+        print(f"  {kind}: {BOLD}{result.merge_request_url}{RESET}")
     if result.push_error:
         print(f"  {RED}✗{RESET} committed, but the push failed: {result.push_error}", file=sys.stderr)
         return 1
@@ -683,6 +699,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     commit = sub.add_parser("commit", help="commit the closest repository above a path, right now")
     commit.add_argument("path", nargs="?", default=".")
+    commit.add_argument(
+        "instructions",
+        nargs="?",
+        help='your own words for the model on what the message should say, e.g. "mention it is only the first half of EH-311"',
+    )
     commit.add_argument("-p", "--prefix", default="", help="put this in front of the message, e.g. a ticket id: -p EH-3311111")
     push_choice = commit.add_mutually_exclusive_group()
     push_choice.add_argument("--push", action="store_true", default=None, help="push afterwards, whatever the config says")
@@ -693,6 +714,11 @@ def build_parser() -> argparse.ArgumentParser:
     # The same thing with the push forced on, for when that is what you mean.
     push_cmd = sub.add_parser("push", help="commit and push the closest repository above a path")
     push_cmd.add_argument("path", nargs="?", default=".")
+    push_cmd.add_argument(
+        "instructions",
+        nargs="?",
+        help='your own words for the model on what the message should say, e.g. "mention it is only the first half of EH-311"',
+    )
     push_cmd.add_argument("-p", "--prefix", default="", help="put this in front of the message, e.g. a ticket id: -p EH-3311111")
     _b2b_options(push_cmd)
     push_cmd.set_defaults(func=cmd_commit, push=True, force_push=True)
