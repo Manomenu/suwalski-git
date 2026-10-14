@@ -12,6 +12,7 @@ import ssl
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 
+from . import language
 from .config import MailConfig
 
 TIMEOUT_SECONDS = 30
@@ -27,6 +28,15 @@ Please find attached the work report for {period}.
 Best regards,
 {author}
 """
+# The same in Polish, for a report whose words are Polish (see `language.py`).
+SUBJECT_PL = "Raport prac {period}{by}"
+BODY_PL = """Dzień dobry,
+
+w załączniku przesyłam raport prac za okres {period}.
+
+Pozdrawiam,
+{author}
+"""
 
 
 class MailError(Exception):
@@ -37,10 +47,11 @@ def not_set_up() -> str:
     return "no mailbox to send from — add one: suwgit add-mail <your address>"
 
 
-def report_text(period: str, author: str) -> tuple[str, str]:
-    """(subject, body) of a report's e-mail, from the fixed template."""
-    subject = SUBJECT.format(period=period, by=f" — {author}" if author else "")
-    body = BODY.format(period=period, author=author).rstrip() + "\n"
+def report_text(period: str, author: str, lang: str = language.ENGLISH) -> tuple[str, str]:
+    """(subject, body) of a report's e-mail, from the fixed template in the report's language."""
+    subject_template, body_template = (SUBJECT_PL, BODY_PL) if lang == language.POLISH else (SUBJECT, BODY)
+    subject = subject_template.format(period=period, by=f" — {author}" if author else "")
+    body = body_template.format(period=period, author=author).rstrip() + "\n"
     return subject, body
 
 

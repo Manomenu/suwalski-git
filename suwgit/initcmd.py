@@ -12,7 +12,7 @@ import getpass
 from pathlib import Path
 
 from . import config as config_module
-from . import gitops, install, paths
+from . import gitops, install, language, paths
 from .config import DEFAULT_INTERVAL_HOURS, Config
 
 BOLD = "\033[1m"
@@ -104,6 +104,16 @@ def _ask_mailboxes(existing: list[config_module.MailConfig]) -> list[config_modu
     return holder.mailboxes
 
 
+def _ask_language(default: str) -> str:
+    """The default language of commits; repositories registered from now on take it."""
+    choices = ", ".join(f"{code} ({language.name(code)})" for code in language.LANGUAGES)
+    while True:
+        try:
+            return language.check(_ask(f"  Commits are written in — {choices}; register --language overrides it", default))
+        except language.LanguageError as exc:
+            print(f"  {exc}")
+
+
 def _ask_location() -> bool:
     """True for dotfiles, False for the home directory. Defaults to whatever is in place."""
     default_dotfiles = paths.CONFIG_FILE.is_symlink() or paths.DOTFILES_CONFIG_FILE.exists()
@@ -164,6 +174,9 @@ def run() -> int:
     )
     mailboxes = _ask_mailboxes(existing.mailboxes)
 
+    print(f"\n{BOLD}Language{RESET}")
+    default_language = _ask_language(existing.language)
+
     config = Config(
         llm=config_module.LlmConfig(
             base_url=base_url.rstrip("/"),
@@ -176,6 +189,7 @@ def run() -> int:
         push=push,
         max_diff_chars=existing.max_diff_chars,
         report_author=report_author,
+        language=default_language,
         mailboxes=mailboxes,
         repos=existing.repos,
     )

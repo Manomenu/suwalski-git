@@ -66,6 +66,19 @@ later revert undid stays in the report, marked **Reverted** with the day. Undo
 a change by hand and commit, and suwgit records it as a revert, not as new
 client work.
 
+### Polish or English
+
+`suwgit init` asks which language commits are written in, English or Polish.
+A repository registered from then on takes that language; give it another with
+`suwgit register <folder> --language pl` (or `en`). The model then writes the
+commit's description, and for client work the summary and work scope, in that
+language. The categories in brackets stay English.
+
+The report follows the commits. A project's summary is in Polish only when
+every commit of that project in the report is Polish; one English commit makes
+it English. Headings, labels and the e-mail are Polish only when every project
+is. Polish letters print correctly in the PDF.
+
 ## Recording work for a client
 
 A client gets a **tenant**: a short working name only you see, such as `lokum`.
@@ -283,7 +296,7 @@ commit refused for a possible secret, and never force-pushes.
 | command | what it does |
 |---|---|
 | `suwgit init` | set up, or change the setup; safe to run again |
-| `suwgit register <folder>` | watch a repository; run again to change its settings: `--default-b2b <tenant>`, `--default-project <name>`, `--no-auto-commit` |
+| `suwgit register <folder>` | watch a repository; run again to change its settings: `--default-b2b <tenant>`, `--default-project <name>`, `--no-auto-commit`, `--language pl\|en` |
 | `suwgit unregister <folder>` | stop watching it |
 | `suwgit list` | the setup, every repository and whether it has changes, every client as `tenant, folder (project)`, and your mailboxes |
 | `suwgit commit [path] ["hint"]` | commit now; `"…"` steers what the message says, `-p <ticket>` for a task id (bare `-p`: from the branch name), `-i` for how-to-test and how-to-review checklists, `--b2b [tenant]` / `--project [name]` for client work, `-y` to skip the question, `--push` / `--no-push` |

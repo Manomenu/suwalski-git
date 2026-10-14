@@ -128,7 +128,7 @@ def test_init_adds_one_mailbox_and_points_to_add_mail(sandbox, monkeypatch, caps
 
 
 def test_init_suggests_the_smtp_server_from_the_address(sandbox, monkeypatch):
-    loaded = _init(monkeypatch, [*BEFORE_MAIL, "y", "me@example.com", "", "ssl", "", ""], secret="x")
+    loaded = _init(monkeypatch, [*BEFORE_MAIL, "y", "me@example.com", "", "ssl", "", "", ""], secret="x")  # last: the language
     [box] = loaded.mailboxes
     assert (box.host, box.security, box.port) == ("smtp.example.com", "ssl", 465)
 
@@ -174,7 +174,7 @@ def _report_setup(tmp_path, monkeypatch, *mailboxes):
     _repo(tmp_path)
     cfg = _config(*mailboxes) if mailboxes else _config()
     monkeypatch.setattr(main.config_module, "load", lambda: cfg)
-    monkeypatch.setattr(main, "summarize_project", lambda *a: "This period, the shop gained a checkout.")
+    monkeypatch.setattr(main, "summarize_project", lambda *a, **_: "This period, the shop gained a checkout.")
     monkeypatch.chdir(tmp_path)
     sent = []
     monkeypatch.setattr(mailer, "send", lambda box, message: sent.append(message))
@@ -184,7 +184,7 @@ def _report_setup(tmp_path, monkeypatch, *mailboxes):
 def test_no_mailbox_stops_before_anything_is_made(sandbox, tmp_path, monkeypatch, capsys):
     _report_setup(tmp_path, monkeypatch)
     monkeypatch.setattr(main.config_module, "load", lambda: Config())
-    monkeypatch.setattr(main, "summarize_project", lambda *a: pytest.fail("must not ask the model"))
+    monkeypatch.setattr(main, "summarize_project", lambda *a, **_: pytest.fail("must not ask the model"))
 
     assert main.main(["report", "--tenant", "lokum", "--mail", "client@example.com"]) == 1
     assert "suwgit add-mail" in capsys.readouterr().err

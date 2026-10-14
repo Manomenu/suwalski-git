@@ -15,8 +15,10 @@ the history back without a database — the git log is the database:
     Project: dashboard
     Tenant: lokum
     Work-Period: 2026-10-12T09:14+02:00/2026-10-12T11:04+02:00
+    Work-Id: 3f9c1a7be210
+    Language: en
 
-`Project`, `Tenant` and `Work-Period` are git trailers (`git log
+`Project`, `Tenant`, `Work-Period`, `Work-Id` and `Language` are git trailers (`git log
 --format=%(trailers)` reads them too). The period is an ISO 8601 interval with
 the UTC offset in it, so it means the same thing on any machine and sorts as text.
 
@@ -46,13 +48,14 @@ PROJECT = "Project"
 TENANT = "Tenant"
 WORK_PERIOD = "Work-Period"
 WORK_ID = "Work-Id"
+LANGUAGE = "Language"
 
 # The last touch of a file is not the end of the work on it: it was saved, and
 # then looked at. Two minutes is a modest allowance, never stretched past now.
 END_ALLOWANCE_SECONDS = 120
 
 SUMMARY_RE = re.compile(rf"^{SUMMARY}:[ \t]*(.+)$", re.MULTILINE)
-TRAILER_RE = re.compile(rf"^({PROJECT}|{TENANT}|{WORK_PERIOD}|{WORK_ID}):[ \t]*(.*)$", re.MULTILINE)
+TRAILER_RE = re.compile(rf"^({PROJECT}|{TENANT}|{WORK_PERIOD}|{WORK_ID}|{LANGUAGE}):[ \t]*(.*)$", re.MULTILINE)
 # What `git cherry-pick -x` adds to a copy: the same work, so it must not tell
 # the copy apart from the original.
 CHERRY_PICK_RE = re.compile(r"^\(cherry picked from commit [0-9a-f]+\)$", re.MULTILINE)
@@ -75,6 +78,7 @@ class Entry:
     work_id: str = ""  # empty in a commit made before Work-Ids existed
     reverted: date | None = None  # the day a revert undid it, if one did
     message: str = ""  # as committed, without a cherry-pick note; for `key`
+    language: str = "en"  # what its summary and work scope are written in; English before the trailer existed
 
     @property
     def key(self) -> str:
@@ -121,6 +125,7 @@ def compose(
     end: datetime,
     work_id: str = "",
     notes: str = "",
+    language: str = "",
 ) -> str:
     """The full B2B commit message. A `work_id` (see `new_work_id`) is added as a trailer.
 
@@ -133,6 +138,8 @@ def compose(
     trailers = f"{PROJECT}: {project}\n{TENANT}: {tenant}\n{WORK_PERIOD}: {format_period(start, end)}"
     if work_id:
         trailers += f"\n{WORK_ID}: {work_id}"
+    if language:
+        trailers += f"\n{LANGUAGE}: {language}"
     notes = f"{notes}\n\n" if notes else ""
     return f"{title}\n\n{SUMMARY}: {summary}\n\n{WORK_SCOPE}:\n{scope}\n\n{notes}{trailers}"
 
@@ -179,6 +186,7 @@ def parse(message: str, repo: Path, commit: str, author: str = "") -> Entry | No
         end=period[1],
         work_scope=scope,
         work_id=trailers.get(WORK_ID, ""),
+        language=trailers.get(LANGUAGE) or "en",
         message=CHERRY_PICK_RE.sub("", message).strip(),
     )
 

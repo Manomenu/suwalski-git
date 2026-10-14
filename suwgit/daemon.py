@@ -54,7 +54,14 @@ def run_once() -> tuple[int, int, int]:
             continue
         # A repository with a default tenant is client work: its sweeps commit
         # as `suwgit commit --b2b` would, so nothing done there goes unrecorded.
-        result = commit_repo(config, root, quiet_seconds=config.quiet_seconds, tenant=entry.default_tenant, project=entry.default_project)
+        result = commit_repo(
+            config,
+            root,
+            quiet_seconds=config.quiet_seconds,
+            tenant=entry.default_tenant,
+            project=entry.default_project,
+            language=config.language_of(root),
+        )
         committed += bool(result.committed)
         pushed += bool(result.pushed)
         deferred += bool(result.deferred)

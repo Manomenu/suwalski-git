@@ -716,7 +716,7 @@ def test_the_report_opens_each_project_with_its_summary(sandbox, tmp_path, monke
 
     _report_setup(tmp_path, monkeypatch)
     asked = []
-    monkeypatch.setattr(main, "summarize_project", lambda cfg, name, *a: asked.append(name) or f"{name} moved forward.")
+    monkeypatch.setattr(main, "summarize_project", lambda cfg, name, *a, **_: asked.append(name) or f"{name} moved forward.")
 
     assert main.main(["report", "--tenant", "lokum", "--format", "json"]) == 0
     assert json.loads(capsys.readouterr().out)["projects"][0]["summary"] == "Lokum Shop moved forward."
@@ -730,7 +730,7 @@ def test_no_summary_never_asks_the_model(sandbox, tmp_path, monkeypatch, capsys)
     import json
 
     _report_setup(tmp_path, monkeypatch)
-    monkeypatch.setattr(main, "summarize_project", lambda *a: pytest.fail("must not ask the model"))
+    monkeypatch.setattr(main, "summarize_project", lambda *a, **_: pytest.fail("must not ask the model"))
 
     assert main.main(["report", "--tenant", "lokum", "--format", "json", "--no-summary"]) == 0
     assert json.loads(capsys.readouterr().out)["projects"][0]["summary"] == ""
@@ -741,7 +741,7 @@ def test_an_unreachable_model_still_gives_a_report(sandbox, tmp_path, monkeypatc
 
     _report_setup(tmp_path, monkeypatch)
 
-    def down(*a):
+    def down(*a, **_):
         raise LlmUnavailable("cannot reach http://vllm:8000/v1")
 
     monkeypatch.setattr(main, "summarize_project", down)
@@ -903,7 +903,7 @@ def test_the_report_marks_reverted_work_and_can_hide_it(sandbox, tmp_path, monke
     tenants.record("lokum", repo)
     monkeypatch.setattr(main.config_module, "load", lambda: _config())
     asked = []
-    monkeypatch.setattr(main, "summarize_project", lambda cfg, name, first, last, work: asked.extend(work) or "x")
+    monkeypatch.setattr(main, "summarize_project", lambda cfg, name, first, last, work, **_: asked.extend(work) or "x")
 
     assert main.main(["report", "--tenant", "lokum", "--format", "json"]) == 0
     entries = json.loads(capsys.readouterr().out)["projects"][0]["entries"]
