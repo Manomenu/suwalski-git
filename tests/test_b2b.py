@@ -36,7 +36,7 @@ def _config(**kw):
     return Config(llm=LlmConfig(base_url="http://vllm:8000/v1", model="qwen"), **kw)
 
 
-def _suggest(cfg, tree, b2b=False):
+def _suggest(cfg, tree, b2b=False, **_):
     return Suggestion(
         "[feature,bugfix] added csv export and fixed main tab", work_scope=SCOPE if b2b else [], summary=SUMMARY if b2b else ""
     )

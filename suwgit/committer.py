@@ -27,6 +27,7 @@ class Result:
     message: str = ""
     commit: str = ""
     pushed: str = ""  # what the push did, empty if it did not happen
+    merge_request_url: str = ""  # where to open a merge request for what was pushed, if the remote has one
     push_error: str = ""  # why it did not, if it was meant to
     unsafe: bool = False  # the model saw something that must not reach a git history
     reverts: str = ""  # the commit these changes exactly undid, committed as its revert
@@ -41,6 +42,7 @@ def commit_repo(
     prefix: str = "",
     tenant: str = "",
     project: str = "",
+    instructions: str = "",
 ) -> Result:
     """Commit everything in `root` under an LLM-written message, then push it.
 
@@ -76,6 +78,9 @@ def commit_repo(
     repository goes into the tenant index `suwgit report` searches. `project`
     defaults to the folder name. `suwgit commit` and `push` pass these for
     `--b2b`; a sweep passes the repository's defaults.
+
+    `instructions` go to the model with the diff, to steer what the message
+    says; only `suwgit commit` and `push` have any.
     """
     log = logger()
     should_push = config.push if push is None else push
@@ -106,7 +111,7 @@ def commit_repo(
                 # and the report marks the undone work. The model is still
                 # asked, for the secret check — an undo can bring one back.
                 undoes = gitops.exact_revert_of(root)
-                suggestion = suggest_commit_message(config.llm, tree, b2b=bool(tenant) and not undoes)
+                suggestion = suggest_commit_message(config.llm, tree, b2b=bool(tenant) and not undoes, instructions=instructions)
 
                 if suggestion.unsafe:
                     # Refusing is the whole point: a secret in a git history is
@@ -156,13 +161,14 @@ def commit_repo(
                 return result
 
             try:
-                result.pushed = gitops.push(root)
+                pushed = gitops.push(root)
             except gitops.GitError as exc:
                 result.push_error = str(exc)
                 log.warning("%s: could not push (%s)", root, exc)
                 repolog.record_blocker(root, f"could not push: {exc}")
                 return result
 
+            result.pushed, result.merge_request_url = pushed.summary, pushed.merge_request_url
             log.info("%s: %s", root, result.pushed)
             repolog.clear(root)
             return result

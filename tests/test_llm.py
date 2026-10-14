@@ -191,3 +191,23 @@ def test_broken_json_is_never_committed_as_prose(monkeypatch):
     _stub(monkeypatch, '{"categories": ["feature"], "description": "dedupl', '```json\n{"categories": ["feature"], "descr')
     with pytest.raises(AnswerUnusable):
         _ask()
+
+
+def test_instructions_reach_the_model_after_the_diff(monkeypatch):
+    from pathlib import Path
+
+    from suwgit import gitops, llm
+    from suwgit.config import LlmConfig
+
+    calls = _stub(monkeypatch, '{"categories": ["feature"], "description": "first half of the export"}')
+    tree = gitops.WorkingTree(root=Path("/r"), status=" M a", stat="", diff="+x")
+    llm.suggest_commit_message(LlmConfig(base_url="http://x", model="m"), tree, instructions="say it is only the first half")
+
+    user = calls[0]["messages"][-1]["content"]
+    assert user.index("+x") < user.index("say it is only the first half")
+
+
+def test_no_instructions_no_extra_words(monkeypatch):
+    calls = _stub(monkeypatch, '{"categories": ["feature"], "description": "x"}')
+    _ask()
+    assert "instructions" not in calls[0]["messages"][-1]["content"]

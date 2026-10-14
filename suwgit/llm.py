@@ -211,10 +211,21 @@ class _HttpFailure(Exception):
         self.detail = detail
 
 
-def _user_prompt(tree: WorkingTree) -> str:
-    return (
+def _user_prompt(tree: WorkingTree, instructions: str = "") -> str:
+    prompt = (
         f"Repository: {tree.root.name}\n\ngit status --porcelain:\n{tree.status}\ngit diff --stat:\n{tree.stat}\ngit diff:\n{tree.diff}\n"
     )
+    if instructions:
+        # Last, after the diff, so the model reads them with the changes fresh in
+        # mind. They shape the wording only: the safety check and the JSON format
+        # are not the developer's to switch off from the command line.
+        prompt += (
+            "\nThe developer's own instructions for this commit's message. Follow them for what the "
+            "message says and how, as long as the answer stays the JSON object described above and "
+            "the safety check is done as described:\n"
+            f"{instructions}\n"
+        )
+    return prompt
 
 
 def _post(config: LlmConfig, payload: dict) -> dict:
@@ -407,27 +418,33 @@ def _complete(config: LlmConfig, system: str, user: str, schema: dict) -> str:
             raise LlmUnavailable(f"HTTP {retry_exc.status} from {config.base_url}: {retry_exc.detail}") from None
 
 
-def suggest_commit_message(config: LlmConfig, tree: WorkingTree, b2b: bool = False) -> Suggestion:
+def suggest_commit_message(config: LlmConfig, tree: WorkingTree, b2b: bool = False, instructions: str = "") -> Suggestion:
     """The whole point: uncommitted changes in, one commit message out.
 
     With `b2b` the suggestion also carries a plain-language summary and a work
     scope for the client, and both are required: a B2B commit without them is
     no record of work, so an answer that lacks one raises instead of falling
     back to a bare title.
+
+    `instructions` are the developer's own words on what the message should
+    say — "mention the ticket is only half done", "write it in Polish" — handed
+    to the model with the diff.
     """
     # A server now and then hands back an answer cut off mid-way, or JSON that
     # does not parse. Asking once more is cheap next to a sweep left uncommitted.
     for attempt in range(ANSWER_ATTEMPTS):
         try:
-            return _suggest_once(config, tree, b2b)
+            return _suggest_once(config, tree, b2b, instructions)
         except AnswerUnusable as exc:
             if attempt + 1 == ANSWER_ATTEMPTS:
                 raise AnswerUnusable(f"{exc} (asked {ANSWER_ATTEMPTS} times)") from None
     raise AssertionError("unreachable")
 
 
-def _suggest_once(config: LlmConfig, tree: WorkingTree, b2b: bool) -> Suggestion:
-    content = _complete(config, B2B_PROMPT if b2b else SYSTEM_PROMPT, _user_prompt(tree), B2B_RESPONSE_SCHEMA if b2b else RESPONSE_SCHEMA)
+def _suggest_once(config: LlmConfig, tree: WorkingTree, b2b: bool, instructions: str = "") -> Suggestion:
+    content = _complete(
+        config, B2B_PROMPT if b2b else SYSTEM_PROMPT, _user_prompt(tree, instructions), B2B_RESPONSE_SCHEMA if b2b else RESPONSE_SCHEMA
+    )
 
     if b2b:
         suggestion = parse_structured(content)

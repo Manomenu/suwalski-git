@@ -77,7 +77,7 @@ A repository must have a git remote to be registered.
 
 ## Commands
 
-Always write the path **before** the flags: a bare `--b2b` would otherwise take
+Always write the path, then a quoted instruction if any, **before** the flags: a bare `--b2b` would otherwise take
 the path for a tenant name.
 
 | want | command |
@@ -86,6 +86,7 @@ the path for a tenant name.
 | commit and push | `suwgit push [path]` |
 | …as client work | add `--b2b <tenant> [--project "<name>"]` |
 | …with a ticket id first in the title | add `-p <ID>`, e.g. `-p EH-3311111` |
+| …with the user's own wishes for the message | `suwgit commit [path] "<instructions>"`, quoted, right after the path |
 | …without pushing even if the config pushes | `suwgit commit [path] --no-push` |
 | report, last 30 days, PDF in the current folder | `suwgit report --tenant <tenant>` |
 | report for a range | add `--from YYYY-MM-DD --to YYYY-MM-DD` (both included) |

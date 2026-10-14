@@ -19,6 +19,8 @@ $ARGUMENTS
      tenant is named and `suwgit list` shows several or none for this repository,
      ask which client instead of guessing;
    - a ticket or task id (YouTrack, Jira, e.g. `EH-3311111`) → `-p <ID>`;
+   - wishes about the message itself ("mention it is half done", "po polsku") →
+     one quoted sentence right after the path, e.g. `suwgit commit . "mention it is half done"`;
    - nothing said → a plain `suwgit commit --no-push`.
 3. Run it and report the commit hash and message. If suwgit refuses because of a
    possible secret, show its reason and stop: do not work around it.

@@ -11,6 +11,7 @@ import re
 import subprocess
 import tempfile
 import time
+import urllib.parse
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -45,7 +46,8 @@ class WorkingTree:
         return bool(self.status.strip())
 
 
-def _git(root: Path | None, *args: str, env: dict[str, str] | None = None) -> str:
+def _git(root: Path | None, *args: str, env: dict[str, str] | None = None, with_stderr: bool = False) -> str:
+    """git's stdout; with `with_stderr`, its stderr after it — where a push's `remote:` lines go."""
     cmd = ["git"]
     if root is not None:
         cmd += ["-C", str(root)]
@@ -68,7 +70,7 @@ def _git(root: Path | None, *args: str, env: dict[str, str] | None = None) -> st
         raise GitError(f"cannot run git: {exc}") from None
     if done.returncode != 0:
         raise GitError((done.stderr or done.stdout).strip() or f"git {' '.join(args)} failed")
-    return done.stdout
+    return done.stdout + done.stderr if with_stderr else done.stdout
 
 
 def find_repo_root(path: Path) -> Path:
@@ -206,7 +208,13 @@ def _explain_push_failure(detail: str) -> str:
     return text
 
 
-def push(root: Path) -> str:
+@dataclass
+class Pushed:
+    summary: str  # what happened, one line
+    merge_request_url: str = ""  # where to open (or see) a merge request for the branch, if anywhere
+
+
+def push(root: Path) -> Pushed:
     """Push the current branch. Never forces, never rebases, never touches other branches.
 
     A branch with no upstream gets one (`-u`), because a commit the daemon made
@@ -218,20 +226,86 @@ def push(root: Path) -> str:
 
     if upstream_of(root, branch):
         try:
-            _git(root, "push")
+            output = _git(root, "push", with_stderr=True)
         except GitError as exc:
             raise GitError(_explain_push_failure(str(exc))) from None
-        return f"pushed {branch}"
+        remote = _branch_remote(root, branch)
+        return Pushed(f"pushed {branch}", merge_request_url(root, remote, branch, output))
 
     names = remotes(root)
     if not names:
         raise GitError("no remote to push to")
     remote = "origin" if "origin" in names else names[0]
     try:
-        _git(root, "push", "--set-upstream", remote, branch)
+        output = _git(root, "push", "--set-upstream", remote, branch, with_stderr=True)
     except GitError as exc:
         raise GitError(_explain_push_failure(str(exc))) from None
-    return f"pushed {branch} and set its upstream to {remote}/{branch}"
+    return Pushed(f"pushed {branch} and set its upstream to {remote}/{branch}", merge_request_url(root, remote, branch, output))
+
+
+def _branch_remote(root: Path, branch: str) -> str:
+    try:
+        return _git(root, "config", f"branch.{branch}.remote").strip()
+    except GitError:
+        return ""
+
+
+# GitLab, GitHub, Gitea and Bitbucket all answer a push of a branch with the
+# link to open a merge request for it, on a `remote:` line of their own.
+_REMOTE_URL = re.compile(r"^remote:\s+.*?(https?://\S+)", re.MULTILINE)
+
+
+def merge_request_url(root: Path, remote: str, branch: str, push_output: str) -> str:
+    """Where to open a merge request for `branch` after pushing it to `remote`, or "".
+
+    The server's own link first: it knows its URL scheme, and on GitLab it
+    links to the open merge request once there is one. GitHub only says it
+    on the first push of a branch, so for GitHub and GitLab hosts the link is
+    built from the remote's URL when the server stayed quiet. The branch the
+    remote merges into has nothing to merge, so it gets no link.
+    """
+    found = _REMOTE_URL.search(push_output)
+    if found:
+        return found.group(1)
+    if not remote or branch == default_branch(root, remote):
+        return ""
+    try:
+        web = web_url(_git(root, "remote", "get-url", remote).strip())
+    except GitError:
+        return ""
+    quoted = urllib.parse.quote(branch, safe="/")
+    if web.startswith("https://github.com/"):
+        return f"{web}/pull/new/{quoted}"
+    if web and "gitlab" in (urllib.parse.urlsplit(web).hostname or ""):
+        return f"{web}/-/merge_requests/new?merge_request%5Bsource_branch%5D={urllib.parse.quote(branch, safe='')}"
+    return ""
+
+
+def default_branch(root: Path, remote: str) -> str:
+    """The branch `remote` merges into: its HEAD if this clone knows it, else main or master."""
+    try:
+        return _git(root, "symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote}/HEAD").strip().partition("/")[2]
+    except GitError:
+        pass
+    for name in ("main", "master"):
+        try:
+            _git(root, "rev-parse", "--verify", "--quiet", f"refs/remotes/{remote}/{name}")
+            return name
+        except GitError:
+            continue
+    return ""
+
+
+def web_url(remote_url: str) -> str:
+    """https://host/group/repo for any of git's ways of writing a remote, or "" for a local one."""
+    url = remote_url.strip()
+    if re.match(r"^[\w.-]+@[\w.-]+:", url):  # scp-like: git@github.com:owner/repo.git
+        url = "ssh://" + url.replace(":", "/", 1)
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("ssh", "git", "http", "https") or not parts.hostname:
+        return ""
+    path = parts.path.strip("/").removesuffix(".git")
+    return f"https://{parts.hostname}/{path}" if path else ""
 
 
 def commit_all(root: Path, message: str) -> str:
