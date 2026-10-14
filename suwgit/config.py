@@ -14,6 +14,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from . import language as lang
 from . import paths
 
 DEFAULT_INTERVAL_HOURS = 1.5
@@ -70,6 +71,10 @@ class RepoEntry:
     # auto_commit on, commit B2B under these whenever a tenant is set.
     default_tenant: str = ""
     default_project: str = ""
+    # The language its commits are written in. Set from the config's default
+    # when the repository is registered; empty in an entry from before languages,
+    # which then follows the default.
+    language: str = ""
 
 
 @dataclass
@@ -87,6 +92,9 @@ class Config:
     # "Prepared by" on `suwgit report`. Empty means the commits' author names,
     # which are often a handle rather than the name a client should read.
     report_author: str = ""
+    # What a repository registered without --language, or not registered at
+    # all, writes its commits in.
+    language: str = lang.DEFAULT
     # The mailboxes reports can be sent from: none until `init` or `add-mail`.
     mailboxes: list[MailConfig] = field(default_factory=list)
     repos: list[RepoEntry] = field(default_factory=list)
@@ -94,6 +102,11 @@ class Config:
     def entry(self, root: Path) -> RepoEntry | None:
         """The registry entry for `root`, if it is registered."""
         return next((e for e in self.repos if e.path == str(root)), None)
+
+    def language_of(self, root: Path) -> str:
+        """The language commits in `root` are written in."""
+        entry = self.entry(root)
+        return (entry.language if entry else "") or self.language
 
     @property
     def interval_seconds(self) -> float:
@@ -169,6 +182,7 @@ def load() -> Config:
         push=bool(raw.get("push", False)),
         max_diff_chars=int(raw.get("max_diff_chars", DEFAULT_MAX_DIFF_CHARS)),
         report_author=str(raw.get("report_author", "")),
+        language=_language(raw.get("language")) or lang.DEFAULT,
         mailboxes=_mailboxes(raw),
         repos=[_repo_entry(item) for item in raw.get("repos", [])],
     )
@@ -233,7 +247,16 @@ def _repo_entry(item) -> RepoEntry:
         auto_commit=bool(item.get("auto_commit", True)),
         default_tenant=str(item.get("default_tenant", "")),
         default_project=str(item.get("default_project", "")),
+        language=_language(item.get("language")),
     )
+
+
+def _language(value) -> str:
+    """A language code from the file, or "" for one missing or unknown — never a crash over a typo."""
+    try:
+        return lang.check(str(value)) if value else ""
+    except lang.LanguageError:
+        return ""
 
 
 def load_or_default() -> Config:
@@ -268,30 +291,34 @@ def register(
     auto_commit: bool | None = None,
     default_tenant: str | None = None,
     default_project: str | None = None,
+    language: str | None = None,
 ) -> str:
     """Add a repository to the registry, or change the settings of one already there.
 
     A setting left as None keeps what the entry has (or the default, for a new
     one), so registering again with one flag changes that flag only. An empty
-    string clears a default.
+    string clears a default. A new entry without a `language` takes the
+    config's default, and keeps it when the default changes later.
     Returns "added", "updated" or "unchanged".
     """
     entry = config.entry(repo_root)
     status = "updated"
     if entry is None:
-        entry = RepoEntry(path=str(repo_root))
+        entry = RepoEntry(path=str(repo_root), language=config.language)
         config.repos.append(entry)
         config.repos.sort(key=lambda e: e.path)
         status = "added"
 
-    before = (entry.auto_commit, entry.default_tenant, entry.default_project)
+    before = (entry.auto_commit, entry.default_tenant, entry.default_project, entry.language)
     if auto_commit is not None:
         entry.auto_commit = auto_commit
     if default_tenant is not None:
         entry.default_tenant = default_tenant
     if default_project is not None:
         entry.default_project = default_project.strip()
-    if status == "updated" and (entry.auto_commit, entry.default_tenant, entry.default_project) == before:
+    if language is not None:
+        entry.language = language
+    if status == "updated" and (entry.auto_commit, entry.default_tenant, entry.default_project, entry.language) == before:
         return "unchanged"
     return status
 

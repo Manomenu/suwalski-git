@@ -28,6 +28,7 @@ import urllib.request
 from dataclasses import dataclass, field
 
 from . import gitops
+from . import language as lang
 from .config import LlmConfig
 from .gitops import WorkingTree
 
@@ -491,7 +492,9 @@ def _complete(config: LlmConfig, system: str, user: str, schema: dict) -> str:
             raise LlmUnavailable(f"HTTP {retry_exc.status} from {config.base_url}: {retry_exc.detail}") from None
 
 
-def suggest_commit_message(config: LlmConfig, tree: WorkingTree, b2b: bool = False, hint: str = "", review: bool = False) -> Suggestion:
+def suggest_commit_message(
+    config: LlmConfig, tree: WorkingTree, b2b: bool = False, hint: str = "", review: bool = False, language: str = lang.DEFAULT
+) -> Suggestion:
     """The whole point: uncommitted changes in, one commit message out.
 
     With `b2b` the suggestion also carries a plain-language summary and a work
@@ -505,20 +508,24 @@ def suggest_commit_message(config: LlmConfig, tree: WorkingTree, b2b: bool = Fal
 
     With `review` the suggestion also carries `how_to_test` and `how_to_review`,
     checklists for whoever checks the change; required too, for the same reason.
+
+    `language` is what every text field is written in (see `language.py`).
     """
     # A server now and then hands back an answer cut off mid-way, or JSON that
     # does not parse. Asking once more is cheap next to a sweep left uncommitted.
     for attempt in range(ANSWER_ATTEMPTS):
         try:
-            return _suggest_once(config, tree, b2b, hint, review)
+            return _suggest_once(config, tree, b2b, hint, review, language)
         except AnswerUnusable as exc:
             if attempt + 1 == ANSWER_ATTEMPTS:
                 raise AnswerUnusable(f"{exc} (asked {ANSWER_ATTEMPTS} times)") from None
     raise AssertionError("unreachable")
 
 
-def _suggest_once(config: LlmConfig, tree: WorkingTree, b2b: bool, hint: str = "", review: bool = False) -> Suggestion:
-    system = (B2B_PROMPT if b2b else SYSTEM_PROMPT) + (REVIEW_PROMPT if review else "")
+def _suggest_once(
+    config: LlmConfig, tree: WorkingTree, b2b: bool, hint: str = "", review: bool = False, language: str = lang.DEFAULT
+) -> Suggestion:
+    system = (B2B_PROMPT if b2b else SYSTEM_PROMPT) + (REVIEW_PROMPT if review else "") + lang.commit_instruction(language)
     tooling = gitops.project_tooling(tree.root) if review else ""
     content = _complete(config, system, _user_prompt(tree, hint, tooling), _response_schema(b2b, review))
 
@@ -614,13 +621,20 @@ def _project_input(project: str, first: str, last: str, entries: list[tuple[str,
     return header + note(omitted) + "\n".join(blocks)
 
 
-def summarize_project(config: LlmConfig, project: str, first: str, last: str, entries: list[tuple[str, str, list[str]]]) -> str:
+def summarize_project(
+    config: LlmConfig, project: str, first: str, last: str, entries: list[tuple[str, str, list[str]]], language: str = lang.DEFAULT
+) -> str:
     """A plain-language summary of one project's work in a report period.
 
     `entries` are (day, summary, work scope) for each B2B commit, oldest first.
     Raises LlmUnavailable when there is nothing usable to say.
     """
-    content = _complete(config, PROJECT_SUMMARY_PROMPT, _project_input(project, first, last, entries), PROJECT_SUMMARY_SCHEMA)
+    content = _complete(
+        config,
+        PROJECT_SUMMARY_PROMPT + lang.summary_instruction(language),
+        _project_input(project, first, last, entries),
+        PROJECT_SUMMARY_SCHEMA,
+    )
     text = strip_reasoning(content).strip().strip("`")
     start, end = text.find("{"), text.rfind("}")
     if start != -1 and end != -1:

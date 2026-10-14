@@ -71,6 +71,7 @@ repositories, which you may run yourself:
 suwgit register ~/projects/shop                         # auto-commit, ordinary commits
 suwgit register ~/projects/shop --default-b2b lokum --default-project "Lokum Shop"
 suwgit register ~/projects/shared --no-auto-commit      # never committed by the service
+suwgit register ~/projects/sklep --language pl          # commits in Polish (default: the one from init)
 ```
 
 A repository must have a git remote to be registered.

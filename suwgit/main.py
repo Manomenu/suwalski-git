@@ -12,7 +12,7 @@ import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from . import b2b, gitops, initcmd, install, logs, mailer, paths, picker, report, sweep, tenants, uninstall
+from . import b2b, gitops, initcmd, install, language, logs, mailer, paths, picker, report, sweep, tenants, uninstall
 from . import config as config_module
 from .committer import commit_repo
 from .llm import LlmUnavailable, summarize_project
@@ -47,7 +47,12 @@ def cmd_register(args: argparse.Namespace) -> int:
         return _fail(str(exc))
 
     status = config_module.register(
-        config, root, auto_commit=args.auto_commit, default_tenant=args.default_tenant, default_project=args.default_project
+        config,
+        root,
+        auto_commit=args.auto_commit,
+        default_tenant=args.default_tenant,
+        default_project=args.default_project,
+        language=args.language,
     )
     entry = config.entry(root)
     if status == "unchanged":
@@ -68,6 +73,7 @@ def _describe(entry: config_module.RepoEntry, config: config_module.Config) -> s
         parts.append(f"--b2b means {entry.default_tenant}")
     if entry.default_project:
         parts.append(f"--project means {entry.default_project}")
+    parts.append(f"commits in {language.name(entry.language or config.language)}")
     return ", ".join(parts)
 
 
@@ -100,6 +106,7 @@ def cmd_list(_args: argparse.Namespace) -> int:
     print(f"{BOLD}model{RESET}    {config.llm.model or '—'} {DIM}@ {config.llm.base_url or '—'}{RESET}")
     print(f"{BOLD}sweep{RESET}    every {config.interval_hours:g} h   {DIM}task: {install.task_status()}{RESET}")
     print(f"{BOLD}push{RESET}     {'yes, after every commit' if config.push else 'no, commits stay local'}")
+    print(f"{BOLD}language{RESET} {language.name(config.language)} {DIM}— for repositories registered without --language{RESET}")
     print(f"{BOLD}log{RESET}      {paths.LOG_FILE}")
     print(f"\n{BOLD}registered{RESET}")
     if not config.repos:
@@ -317,6 +324,7 @@ def cmd_commit(args: argparse.Namespace) -> int:
         hint=hint,
         push_anyway=push is True,
         review=args.review,
+        language=config.language_of(root),
     )
     if tenant and result.committed and not result.reverts:
         try:
@@ -387,6 +395,7 @@ def _project_summaries(entries: list[b2b.Entry], first: date, last: date) -> dic
         return {}
 
     summaries = {}
+    languages = report.project_languages(entries)
     for name, items in report.by_project(entries).items():
         print(f"{DIM}summarising {name} with {llm_config.model or 'the model'}…{RESET}", file=sys.stderr)
         work = [
@@ -398,7 +407,7 @@ def _project_summaries(entries: list[b2b.Entry], first: date, last: date) -> dic
             for e in items
         ]
         try:
-            summaries[name] = summarize_project(llm_config, name, first.isoformat(), last.isoformat(), work)
+            summaries[name] = summarize_project(llm_config, name, first.isoformat(), last.isoformat(), work, language=languages[name])
         except LlmUnavailable as exc:
             print(f"  {RED}!{RESET} {name}: no project summary — {exc}", file=sys.stderr)
     return summaries
@@ -564,7 +573,7 @@ def cmd_report(args: argparse.Namespace) -> int:
             if not _confirm(f"  Send it to {BOLD}{to}{RESET} from {mailbox.sender}?", default=False):
                 print(f"{DIM}not sent — the report stays at {target}; -y sends without asking{RESET}")
                 return 0
-        subject, body = mailer.report_text(f"{first:%Y-%m-%d} – {last:%Y-%m-%d}", _report_author())
+        subject, body = mailer.report_text(f"{first:%Y-%m-%d} – {last:%Y-%m-%d}", _report_author(), report.report_language(entries))
         message = mailer.build(mailbox, recipients, subject, body, target.read_bytes(), target.name)
         try:
             mailer.send(mailbox, message)
@@ -602,6 +611,13 @@ def cmd_init(_args: argparse.Namespace) -> int:
     except (KeyboardInterrupt, EOFError):
         print("\naborted, nothing written")
         return 1
+
+
+def _language(text: str) -> str:
+    try:
+        return language.check(text)
+    except language.LanguageError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
 
 
 def _tenant(text: str) -> str:
@@ -718,6 +734,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--default-project",
         metavar="NAME",
         help="what --project means here when bare or left out (otherwise the folder name); '' forgets it",
+    )
+    register.add_argument(
+        "--language",
+        type=_language,
+        metavar="|".join(language.LANGUAGES),
+        help="the language its commits are written in (default: the one chosen in suwgit init)",
     )
     register.set_defaults(func=cmd_register)
 

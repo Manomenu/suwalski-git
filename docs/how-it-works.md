@@ -141,6 +141,7 @@ Project: Lokum Shop
 Tenant: lokum
 Work-Period: 2026-10-12T09:14+02:00/2026-10-12T11:04+02:00
 Work-Id: 05bbe3447cb0
+Language: en
 ```
 
 - The **title** stays technical, for the developer and `git log`.
@@ -153,7 +154,14 @@ Work-Id: 05bbe3447cb0
   it, and a report counts the work once. A commit made before Work-Ids is
   matched by its message instead, ignoring the `(cherry picked from …)` line
   that `cherry-pick -x` adds.
-- **Project**, **Tenant**, **Work-Period** and **Work-Id** are git trailers, so
+- **Language** is what the summary and work scope are written in, `en` or
+  `pl`: the repository's language (`register --language`, else the default
+  from `init`). A commit without it predates languages and counts as English.
+  A report's project is Polish only when all its commits are, and the report's
+  own words only when all projects are (`suwgit/language.py`).
+- If `-i` was given, the **How to test** and **How to review** checklists sit
+  between the work scope and the trailers. The report does not read them.
+- **Project**, **Tenant**, **Work-Period**, **Work-Id** and **Language** are git trailers, so
   `git log --format='%(trailers)'` reads them too.
 - **Work-Period** is an ISO 8601 interval with the UTC offset in it, so it
   means the same on any machine. It runs from the oldest modification time
@@ -215,9 +223,11 @@ under its defaults, and never asks.
 The PDF is written by hand in `report.py` instead of with a library: the text
 uses Helvetica in WinAnsi encoding, one of the fonts every PDF reader has built
 in, so nothing is embedded and a report is a few kilobytes. Word wrapping
-measures text with Helvetica's character widths. That encoding covers English
-and Western European text; Polish letters need an embedded font, which is on the
-[TODO](../TODO.md) list together with a report language switch.
+measures text with Helvetica's character widths. WinAnsi has no ą, ć, ę, ł, ń,
+ś, ź or ż, but Helvetica has the glyphs: the font's encoding names them with
+`/Differences` in slots WinAnsi leaves empty or a report never prints (¤, ¦, ²,
+¼ …), so Polish prints correctly with nothing embedded. The document title goes
+in as UTF-16, which every reader shows correctly in its title bar.
 
 `--format json` prints the same report to stdout instead of writing a PDF —
 stdout then holds the JSON and nothing else, so it pipes into `jq`. It carries
@@ -350,8 +360,9 @@ writes nothing.
 | `push` | push after each commit, sweeps included |
 | `max_diff_chars` | how much diff the model reads; the default sends the whole diff in almost every case |
 | `report_author` | the "Prepared by" name on reports; empty means the commits' author names |
+| `language` | `en` or `pl`: the language of commits in a repository registered without `--language`, or not registered |
 | `mailboxes` | the mailboxes `report --mail` can send from; `init` and `add-mail` add them. Passwords are never stored here (see below). A config with one `mail` object, as before, still loads |
-| `repos` | the registry, written by `register`. A bare path, as older versions wrote it, still loads |
+| `repos` | the registry, written by `register`; each entry has its own `language`. A bare path, as older versions wrote it, still loads |
 
 
 ## Where things live

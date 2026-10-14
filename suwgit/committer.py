@@ -45,6 +45,7 @@ def commit_repo(
     hint: str = "",
     push_anyway: bool = False,
     review: bool = False,
+    language: str = "en",
 ) -> Result:
     """Commit everything in `root` under an LLM-written message, then push it.
 
@@ -87,6 +88,8 @@ def commit_repo(
     `review` is `-i`: the message also says how to test the change and how
     to review it, as two checklists for the merge request.
 
+    `language` is what the message is written in; a B2B commit records it.
+
     `push_anyway` is `suwgit push` asked for by hand: a clean tree is then
     pushed exactly as `git push` would, whether or not anything looks pending —
     a branch that only fast-forwarded onto a merge has nothing "unpushed" by the
@@ -121,7 +124,9 @@ def commit_repo(
                 # and the report marks the undone work. The model is still
                 # asked, for the secret check — an undo can bring one back.
                 undoes = gitops.exact_revert_of(root)
-                suggestion = suggest_commit_message(config.llm, tree, b2b=bool(tenant) and not undoes, hint=hint, review=review)
+                suggestion = suggest_commit_message(
+                    config.llm, tree, b2b=bool(tenant) and not undoes, hint=hint, review=review, language=language
+                )
 
                 if suggestion.unsafe:
                     # Refusing is the whole point: a secret in a git history is
@@ -153,6 +158,7 @@ def commit_repo(
                         end,
                         b2b_format.new_work_id(),
                         notes=notes,
+                        language=language,
                     )
                 commit = gitops.commit_all(root, message)
                 if tenant and not undoes:
