@@ -6,6 +6,7 @@ machine where only git itself is installed.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -152,6 +153,34 @@ def read_working_tree(root: Path, max_diff_chars: int = DEFAULT_MAX_DIFF_CHARS) 
         diff = diff[:max_diff_chars] + f"\n… (diff truncated at {max_diff_chars} characters)"
 
     return WorkingTree(root=root, status=status, stat=stat, diff=diff)
+
+
+# Where a project names its commands — what a "how to test" may point to.
+TASK_FILES = ("justfile", "Justfile", ".justfile", "Makefile", "Taskfile.yml", "package.json", "pyproject.toml")
+MAX_TASK_FILE_CHARS = 2_000
+MAX_TOP_LEVEL_ENTRIES = 80
+
+
+def project_tooling(root: Path) -> str:
+    """The top level of the repository and its task files, cut short: enough to know which commands exist."""
+    try:
+        names = sorted(entry.name + ("/" if entry.is_dir() else "") for entry in root.iterdir() if entry.name != ".git")
+    except OSError:
+        return ""
+    parts = ["top level: " + "  ".join(names[:MAX_TOP_LEVEL_ENTRIES])]
+    for name in TASK_FILES:
+        try:
+            text = (root / name).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if name == "package.json":
+            try:
+                text = json.dumps({"scripts": json.loads(text).get("scripts", {})}, indent=2)
+            except (ValueError, AttributeError):
+                pass
+        cut = "\n… (cut)" if len(text) > MAX_TASK_FILE_CHARS else ""
+        parts.append(f"--- {name}\n{text[:MAX_TASK_FILE_CHARS]}{cut}")
+    return "\n".join(parts)
 
 
 def current_branch(root: Path) -> str | None:

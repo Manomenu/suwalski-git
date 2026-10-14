@@ -27,6 +27,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 
+from . import gitops
 from .config import LlmConfig
 from .gitops import WorkingTree
 
@@ -52,6 +53,8 @@ ANSWER_ATTEMPTS = 2
 MAX_WORK_SCOPE_ITEMS = 8
 MAX_WORK_SCOPE_ITEM_CHARS = 200
 MAX_SUMMARY_CHARS = 300
+MAX_REVIEW_ITEMS = 10
+MAX_REVIEW_ITEM_CHARS = 300
 # Headroom for a backend that ignores the switch below and thinks anyway. With
 # thinking off the answer is ~36 tokens, so this costs nothing when it is honoured.
 MAX_TOKENS = 3000
@@ -178,6 +181,45 @@ Bad (too technical for this reader):
 """
 )
 
+# With `-i`, the message also tells a colleague how to check the change and how
+# to read it: two checklists, technical this time, ready to paste into a merge
+# request. They are their own fields, so suwgit lays them out, not the model.
+REVIEW_PROMPT = f"""
+The developer also wants the commit message to guide whoever checks and reviews
+these changes, a fellow developer reading the merge request. So the JSON object
+holds two more fields, each 1 to {MAX_REVIEW_ITEMS} short checklist items, technical
+this time — file, class and command names are welcome, in backticks:
+
+- "how_to_test": how to see that the change works. The commands to run and what
+  they must show, the screen or endpoint to try and what to expect, the edge
+  case worth trying by hand. Only name a command that exists: one in the
+  project's task files below, or one the diff itself adds or uses. If none
+  fits, say what to try instead of inventing a command.
+- "how_to_review": how to read the diff. Where to start, what is moved or
+  renamed rather than changed, which decision deserves a second look, what
+  would be easy to miss, and what the change deliberately does not do.
+
+Each item is one concrete step, imperative or a short statement, at most 30
+words, no leading dash or checkbox. Do not repeat the same point in both lists.
+Good:
+  "how_to_test": ["`just check` passes", "Start without `Tenant` → the app refuses to start with a clear error"]
+  "how_to_review": ["Start with `Extensions.cs`: the bot's files go before environment variables, so those still win"]
+"""
+
+REVIEW_FIELDS = {
+    "how_to_test": {"type": "array", "minItems": 1, "maxItems": MAX_REVIEW_ITEMS, "items": {"type": "string"}},
+    "how_to_review": {"type": "array", "minItems": 1, "maxItems": MAX_REVIEW_ITEMS, "items": {"type": "string"}},
+}
+
+
+def _response_schema(b2b: bool, review: bool) -> dict:
+    schema = copy.deepcopy(B2B_RESPONSE_SCHEMA if b2b else RESPONSE_SCHEMA)
+    if review:
+        body = schema["json_schema"]["schema"]
+        body["properties"].update(copy.deepcopy(REVIEW_FIELDS))
+        body["required"] += list(REVIEW_FIELDS)
+    return schema
+
 
 @dataclass
 class Suggestion:
@@ -188,6 +230,8 @@ class Suggestion:
     unsafe_reason: str = ""
     work_scope: list[str] = field(default_factory=list)  # B2B mode only
     summary: str = ""  # B2B mode only: the plain-language version, for the client
+    how_to_test: list[str] = field(default_factory=list)  # review mode only
+    how_to_review: list[str] = field(default_factory=list)  # review mode only
 
 
 class LlmUnavailable(Exception):
@@ -211,11 +255,13 @@ class _HttpFailure(Exception):
         self.detail = detail
 
 
-def _user_prompt(tree: WorkingTree, instructions: str = "") -> str:
+def _user_prompt(tree: WorkingTree, hint: str = "", tooling: str = "") -> str:
     prompt = (
         f"Repository: {tree.root.name}\n\ngit status --porcelain:\n{tree.status}\ngit diff --stat:\n{tree.stat}\ngit diff:\n{tree.diff}\n"
     )
-    if instructions:
+    if tooling:
+        prompt += f"\nThe project's top level and task files, for the commands that exist:\n{tooling}\n"
+    if hint:
         # Last, after the diff, so the model reads them with the changes fresh in
         # mind. They shape the wording only: the safety check and the JSON format
         # are not the developer's to switch off from the command line.
@@ -223,7 +269,7 @@ def _user_prompt(tree: WorkingTree, instructions: str = "") -> str:
             "\nThe developer's own instructions for this commit's message. Follow them for what the "
             "message says and how, as long as the answer stays the JSON object described above and "
             "the safety check is done as described:\n"
-            f"{instructions}\n"
+            f"{hint}\n"
         )
     return prompt
 
@@ -325,6 +371,31 @@ def clean_work_scope(items) -> list[str]:
     return kept[:MAX_WORK_SCOPE_ITEMS]
 
 
+def clean_review_items(items) -> list[str]:
+    """Checklist items as single lines, without the dash or checkbox suwgit adds itself."""
+    if isinstance(items, str):
+        items = items.splitlines()
+    kept = []
+    for item in items if isinstance(items, list) else []:
+        text = re.sub(r"^(?:[-*•]\s*)?(?:\[[ xX]?\]\s*)?", "", " ".join(str(item).split()))
+        if not text:
+            continue
+        if len(text) > MAX_REVIEW_ITEM_CHARS:
+            text = text[:MAX_REVIEW_ITEM_CHARS].rsplit(" ", 1)[0].rstrip(",") + "…"
+        kept.append(text)
+    return kept[:MAX_REVIEW_ITEMS]
+
+
+def review_notes(how_to_test: list[str], how_to_review: list[str]) -> str:
+    """The two checklists as they go into the message: markdown, so a merge request renders them."""
+    sections = [
+        f"{heading}:\n" + "\n".join(f"- [ ] {item}" for item in items)
+        for heading, items in (("How to test", how_to_test), ("How to review", how_to_review))
+        if items
+    ]
+    return "\n\n".join(sections)
+
+
 def parse_structured(content: str) -> Suggestion:
     """Read the JSON object the schema forced the model to produce."""
     text = strip_reasoning(content).strip().strip("`")
@@ -348,6 +419,8 @@ def parse_structured(content: str) -> Suggestion:
         unsafe_reason=" ".join(str(payload.get("unsafe_reason") or "").split()),
         work_scope=clean_work_scope(payload.get("work_scope") or []),
         summary=clean_summary(payload.get("summary") or ""),
+        how_to_test=clean_review_items(payload.get("how_to_test") or []),
+        how_to_review=clean_review_items(payload.get("how_to_review") or []),
     )
 
 
@@ -418,7 +491,7 @@ def _complete(config: LlmConfig, system: str, user: str, schema: dict) -> str:
             raise LlmUnavailable(f"HTTP {retry_exc.status} from {config.base_url}: {retry_exc.detail}") from None
 
 
-def suggest_commit_message(config: LlmConfig, tree: WorkingTree, b2b: bool = False, instructions: str = "") -> Suggestion:
+def suggest_commit_message(config: LlmConfig, tree: WorkingTree, b2b: bool = False, hint: str = "", review: bool = False) -> Suggestion:
     """The whole point: uncommitted changes in, one commit message out.
 
     With `b2b` the suggestion also carries a plain-language summary and a work
@@ -426,25 +499,36 @@ def suggest_commit_message(config: LlmConfig, tree: WorkingTree, b2b: bool = Fal
     no record of work, so an answer that lacks one raises instead of falling
     back to a bare title.
 
-    `instructions` are the developer's own words on what the message should
+    `hint` holds the developer's own words on what the message should
     say — "mention the ticket is only half done", "write it in Polish" — handed
     to the model with the diff.
+
+    With `review` the suggestion also carries `how_to_test` and `how_to_review`,
+    checklists for whoever checks the change; required too, for the same reason.
     """
     # A server now and then hands back an answer cut off mid-way, or JSON that
     # does not parse. Asking once more is cheap next to a sweep left uncommitted.
     for attempt in range(ANSWER_ATTEMPTS):
         try:
-            return _suggest_once(config, tree, b2b, instructions)
+            return _suggest_once(config, tree, b2b, hint, review)
         except AnswerUnusable as exc:
             if attempt + 1 == ANSWER_ATTEMPTS:
                 raise AnswerUnusable(f"{exc} (asked {ANSWER_ATTEMPTS} times)") from None
     raise AssertionError("unreachable")
 
 
-def _suggest_once(config: LlmConfig, tree: WorkingTree, b2b: bool, instructions: str = "") -> Suggestion:
-    content = _complete(
-        config, B2B_PROMPT if b2b else SYSTEM_PROMPT, _user_prompt(tree, instructions), B2B_RESPONSE_SCHEMA if b2b else RESPONSE_SCHEMA
-    )
+def _suggest_once(config: LlmConfig, tree: WorkingTree, b2b: bool, hint: str = "", review: bool = False) -> Suggestion:
+    system = (B2B_PROMPT if b2b else SYSTEM_PROMPT) + (REVIEW_PROMPT if review else "")
+    tooling = gitops.project_tooling(tree.root) if review else ""
+    content = _complete(config, system, _user_prompt(tree, hint, tooling), _response_schema(b2b, review))
+
+    if review:
+        suggestion = parse_structured(content)
+        if not suggestion.how_to_test or not suggestion.how_to_review:
+            raise AnswerUnusable("-i needs both checklists, how to test and how to review, and the model left one out")
+        if b2b and (not suggestion.work_scope or not suggestion.summary):
+            raise AnswerUnusable("B2B mode needs a summary and a work scope, and the model left one out")
+        return suggestion
 
     if b2b:
         suggestion = parse_structured(content)

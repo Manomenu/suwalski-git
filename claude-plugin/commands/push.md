@@ -19,6 +19,7 @@ $ARGUMENTS
      ask which client instead of guessing;
    - a ticket or task id (YouTrack, Jira, e.g. `EH-3311111`) → `-p <ID>`;
      "ticket from the branch" → a bare `-p` as the very last argument;
+   - "with test/review instructions", "for code review", "z instrukcją jak sprawdzić" → `-i`;
    - wishes about the message itself ("mention it is half done", "po polsku") →
      one quoted sentence right after the path, e.g. `suwgit push . "mention it is half done"`;
    - nothing said → a plain `suwgit push`.

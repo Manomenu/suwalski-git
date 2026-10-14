@@ -145,7 +145,7 @@ A bare `-p` takes the id from the branch name: the first run of letters, a
 dash and digits, upper-cased. On `feature/EH-3311-csv-export` (or
 `eh-3311-csv-export`), `suwgit push -p` puts `EH-3311` in front. A branch with
 no such id is an error, never a guess. Put a bare `-p` last, after the path and
-the instructions, or it takes them for the id.
+the hint, or it takes them for the id.
 
 ## Your own words for the message
 
@@ -160,6 +160,33 @@ $ suwgit commit "write the title in Polish"
 Without a path, a quoted sentence means the current folder. The model still
 checks the changes for secrets, whatever the sentence says. With `--b2b`, the
 sentence steers the client's summary and work scope too.
+
+## How to test, how to review
+
+With `-i` / `--instructions`, the message also tells whoever checks the merge
+request how to test the change and how to read it, as two checklists:
+
+```console
+$ suwgit push -i
+✓ /home/you/projects/smart-router  8d2f1c4
+  [feature,config] added per-bot configuration selected by Tenant
+
+  How to test:
+  - [ ] `just check` passes
+  - [ ] Start without `Tenant` → the app refuses to start with a clear error
+
+  How to review:
+  - [ ] Start with `Extensions.cs`: the bot's files go before environment variables, so those still win
+  - [ ] `launchSettings.json`: four profiles, each with `ASPNETCORE_ENVIRONMENT` and `Tenant`
+```
+
+The model sees the diff, the top level of the repository and its task files
+(`justfile`, `Makefile`, `package.json` scripts, …), so the commands it names
+are ones the project has. The lists are markdown, so pasted into a merge request
+— or used by GitLab as its description — they render as checkboxes. It works
+with `--b2b` too: the lists go between the work scope and the trailers, and the
+report does not show them. A hint in quotes steers them like the rest of the
+message, e.g. `suwgit push -i . "the checklists in Polish"`.
 
 ## Merge request link
 
@@ -261,8 +288,8 @@ commit refused for a possible secret, and never force-pushes.
 | `suwgit register <folder>` | watch a repository; run again to change its settings: `--default-b2b <tenant>`, `--default-project <name>`, `--no-auto-commit` |
 | `suwgit unregister <folder>` | stop watching it |
 | `suwgit list` | the setup, every repository and whether it has changes, every client as `tenant, folder (project)`, and your mailboxes |
-| `suwgit commit [path] ["instructions"]` | commit now; `"…"` steers what the message says, `-p <ticket>` for a task id (bare `-p`: from the branch name), `--b2b [tenant]` / `--project [name]` for client work, `-y` to skip the question, `--push` / `--no-push` |
-| `suwgit push [path] ["instructions"]` | commit now and push, then show the merge request link |
+| `suwgit commit [path] ["hint"]` | commit now; `"…"` steers what the message says, `-p <ticket>` for a task id (bare `-p`: from the branch name), `-i` for how-to-test and how-to-review checklists, `--b2b [tenant]` / `--project [name]` for client work, `-y` to skip the question, `--push` / `--no-push` |
+| `suwgit push [path] ["hint"]` | commit now and push, then show the merge request link |
 | `suwgit report --tenant <tenant>` | the PDF report; see [above](#the-report) |
 | `suwgit add-mail [address]` / `remove-mail <address>` | add (or update) a mailbox reports can be sent from / forget one |
 | `suwgit logs [-n N] [-f]` | what the scheduled sweeps did |
