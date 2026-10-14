@@ -191,6 +191,7 @@ def _tenant_rows(config: config_module.Config) -> list[tuple[str, Path, str]]:
 
 # What a bare `--b2b` / `--project` parses to: "the repository's default".
 FROM_DEFAULT = object()
+FROM_BRANCH = object()  # a bare -p: the ticket id in the branch name
 
 
 def _b2b_for(entry: config_module.RepoEntry | None, root: Path, args: argparse.Namespace) -> tuple[str, str, bool]:
@@ -287,6 +288,16 @@ def cmd_commit(args: argparse.Namespace) -> int:
     except ValueError as exc:
         return _fail(str(exc))
 
+    prefix = args.prefix.strip() if isinstance(args.prefix, str) else ""
+    if args.prefix is FROM_BRANCH:
+        branch = gitops.current_branch(root) or ""
+        prefix = gitops.ticket_in_branch(branch)
+        if not prefix:
+            return _fail(
+                f"a bare -p takes the ticket id from the branch, and {branch or 'a detached HEAD'!r} has none "
+                f"(letters, a dash, digits, e.g. feature/EH-3311-csv) — name it:  -p EH-3311"
+            )
+
     push = True if getattr(args, "force_push", False) else args.push
     if from_last and not args.yes:
         action = "Commit and push" if (config.push if push is None else push) else "Commit"
@@ -296,7 +307,16 @@ def cmd_commit(args: argparse.Namespace) -> int:
                 f"nothing committed — name it instead:  suwgit {args.command} --b2b <tenant> --project <name>   (-y skips this question)"
             )
     print(f"{DIM}asking {config.llm.model or 'the model'} about {root}…{RESET}")
-    result = commit_repo(config, root, push=push, prefix=args.prefix.strip(), tenant=tenant, project=project, instructions=instructions)
+    result = commit_repo(
+        config,
+        root,
+        push=push,
+        prefix=prefix,
+        tenant=tenant,
+        project=project,
+        instructions=instructions,
+        push_anyway=push is True,
+    )
     if tenant and result.committed and not result.reverts:
         try:
             tenants.remember(root, tenant, project)
@@ -591,6 +611,17 @@ def _tenant(text: str) -> str:
         raise argparse.ArgumentTypeError(str(exc)) from None
 
 
+def _prefix_option(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "-p",
+        "--prefix",
+        nargs="?",
+        const=FROM_BRANCH,
+        default="",
+        help="put this in front of the message, e.g. a ticket id: -p EH-3311111; bare, the first id in the branch name (feature/EH-3311-csv → EH-3311)",
+    )
+
+
 def _b2b_options(parser: argparse.ArgumentParser) -> None:
     """--b2b [TENANT] / --project [NAME] for one commit; bare, they take the registered default."""
     parser.add_argument(
@@ -704,7 +735,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         help='your own words for the model on what the message should say, e.g. "mention it is only the first half of EH-311"',
     )
-    commit.add_argument("-p", "--prefix", default="", help="put this in front of the message, e.g. a ticket id: -p EH-3311111")
+    _prefix_option(commit)
     push_choice = commit.add_mutually_exclusive_group()
     push_choice.add_argument("--push", action="store_true", default=None, help="push afterwards, whatever the config says")
     push_choice.add_argument("--no-push", dest="push", action="store_false", help="commit only, whatever the config says")
@@ -719,7 +750,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         help='your own words for the model on what the message should say, e.g. "mention it is only the first half of EH-311"',
     )
-    push_cmd.add_argument("-p", "--prefix", default="", help="put this in front of the message, e.g. a ticket id: -p EH-3311111")
+    _prefix_option(push_cmd)
     _b2b_options(push_cmd)
     push_cmd.set_defaults(func=cmd_commit, push=True, force_push=True)
 

@@ -150,6 +150,17 @@ def current_branch(root: Path) -> str | None:
         return None
 
 
+# A tracker id the way YouTrack and Jira write them: letters, a dash, digits.
+# Anchored on a letter boundary so `feature/EH-3311-csv` gives EH-3311, not H-3311.
+_TICKET = re.compile(r"(?<![A-Za-z])[A-Za-z]+-\d+")
+
+
+def ticket_in_branch(branch: str) -> str:
+    """The first tracker id in a branch name, upper-cased — `feature/eh-3311-csv` is EH-3311 — or ""."""
+    found = _TICKET.search(branch)
+    return found.group(0).upper() if found else ""
+
+
 def upstream_of(root: Path, branch: str) -> str | None:
     try:
         return _git(root, "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}").strip() or None
@@ -213,12 +224,15 @@ def push(root: Path) -> Pushed:
         raise GitError("detached HEAD — no branch to push")
 
     if upstream_of(root, branch):
+        # Asked before, not read from git's answer: that is translated on a Polish system.
+        up_to_date = _git(root, "rev-parse", "HEAD").strip() == _git(root, "rev-parse", "@{upstream}").strip()
         try:
             output = _git(root, "push", with_stderr=True)
         except GitError as exc:
             raise GitError(_explain_push_failure(str(exc))) from None
         remote = _branch_remote(root, branch)
-        return Pushed(f"pushed {branch}", merge_request_url(root, remote, branch, output))
+        summary = f"{branch} was already up to date on {remote or 'the remote'}" if up_to_date else f"pushed {branch}"
+        return Pushed(summary, merge_request_url(root, remote, branch, output))
 
     names = remotes(root)
     if not names:

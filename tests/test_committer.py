@@ -150,3 +150,23 @@ def test_a_lone_sentence_is_instructions_for_the_current_folder():
 
     args = main.build_parser().parse_args(["push", "../other", "say it is a hotfix", "-p", "EH-1"])
     assert main._path_and_instructions(args) == ("../other", "say it is a hotfix")
+
+
+def test_a_bare_prefix_takes_the_ticket_id_from_the_branch(sandbox, tmp_path, monkeypatch, capsys):
+    from suwgit import config as config_module
+    from suwgit import main
+
+    repo = _repo(tmp_path / "repo")
+    gitops.commit_all(repo, "[chore] init")
+    seen = {}
+    monkeypatch.setattr(config_module, "load", _config)
+    monkeypatch.setattr(main, "commit_repo", lambda cfg, root, **kw: seen.update(kw) or committer.Result(root, False, "x"))
+
+    assert main.main(["commit", str(repo), "-p"]) == 1
+    assert "has none" in capsys.readouterr().err
+
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "-b", "feature/EH-3311-csv"], check=True)
+    main.main(["push", str(repo), "-p"])
+    assert seen["prefix"] == "EH-3311" and seen["push_anyway"] is True
+    main.main(["commit", str(repo), "-p"])
+    assert seen["push_anyway"] is False

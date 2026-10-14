@@ -280,3 +280,60 @@ def test_pushing_a_branch_reports_the_link(sandbox, repo_with_remote, monkeypatc
 
     assert result.pushed.startswith("pushed feature")
     assert result.merge_request_url == "https://gitlab.example.com/team/app/-/merge_requests/new?merge_request%5Bsource_branch%5D=feature"
+
+
+def _fast_forwarded_branch(remote, work):
+    """`feature` is on the remote; master moves on; feature fast-forwards onto it — nothing new, still behind on origin."""
+    git = ["git", "-C", str(work)]
+    main_branch = gitops.current_branch(work)
+    subprocess.run([*git, "checkout", "-q", "-b", "feature"], check=True)
+    subprocess.run([*git, "push", "-q", "-u", "origin", "feature"], check=True)
+    subprocess.run([*git, "checkout", "-q", main_branch], check=True)
+    (work / "b.txt").write_text("more")
+    gitops.commit_all(work, "[feature] added b")
+    subprocess.run([*git, "push", "-q"], check=True)
+    subprocess.run([*git, "checkout", "-q", "feature"], check=True)
+    subprocess.run([*git, "merge", "-q", "--ff-only", main_branch], check=True)
+
+
+def test_push_by_hand_pushes_a_clean_branch_like_git_push(sandbox, repo_with_remote, monkeypatch):
+    remote, work = repo_with_remote
+    _fast_forwarded_branch(remote, work)
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree, **_: Suggestion("[chore] nope"))
+
+    result = committer.commit_repo(_config(push=True), work, push=True, push_anyway=True)
+
+    assert not result.committed
+    assert result.pushed == "pushed feature"
+    assert "[feature] added b" in _remote_log(remote, "feature")
+
+
+def test_the_daemon_still_leaves_such_a_branch_alone(sandbox, repo_with_remote, monkeypatch):
+    remote, work = repo_with_remote
+    _fast_forwarded_branch(remote, work)
+
+    result = committer.commit_repo(_config(push=True), work)
+
+    assert result.reason == "nothing to commit" and not result.pushed
+    assert "[feature] added b" not in _remote_log(remote, "feature")
+
+
+def test_a_push_with_nothing_to_send_says_so(sandbox, repo_with_remote):
+    _, work = repo_with_remote
+    result = committer.commit_repo(_config(push=True), work, push=True, push_anyway=True)
+    assert result.pushed.endswith("was already up to date on origin")
+
+
+@pytest.mark.parametrize(
+    "branch, ticket",
+    [
+        ("feature/EH-3311-csv-export", "EH-3311"),
+        ("EH-3311111", "EH-3311111"),
+        ("bugfix/eh-12_and_AB-3", "EH-12"),
+        ("fix2-EH-7", "EH-7"),
+        ("master", ""),
+        ("feature/csv-export", ""),
+    ],
+)
+def test_the_ticket_id_in_a_branch_name(branch, ticket):
+    assert gitops.ticket_in_branch(branch) == ticket

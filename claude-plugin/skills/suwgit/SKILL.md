@@ -85,7 +85,7 @@ the path for a tenant name.
 | commit now | `suwgit commit [path]` |
 | commit and push | `suwgit push [path]` |
 | …as client work | add `--b2b <tenant> [--project "<name>"]` |
-| …with a ticket id first in the title | add `-p <ID>`, e.g. `-p EH-3311111` |
+| …with a ticket id first in the title | add `-p <ID>`, e.g. `-p EH-3311111`; a bare `-p`, last, takes it from the branch name |
 | …with the user's own wishes for the message | `suwgit commit [path] "<instructions>"`, quoted, right after the path |
 | …without pushing even if the config pushes | `suwgit commit [path] --no-push` |
 | report, last 30 days, PDF in the current folder | `suwgit report --tenant <tenant>` |
