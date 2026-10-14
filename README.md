@@ -141,6 +141,12 @@ The id goes in front of the title exactly as you typed it. The AI model never
 sees it, so it cannot get it wrong. The tracker links the commit to the task as
 usual. It works together with `--b2b`, and scheduled sweeps add no prefix.
 
+A bare `-p` takes the id from the branch name: the first run of letters, a
+dash and digits, upper-cased. On `feature/EH-3311-csv-export` (or
+`eh-3311-csv-export`), `suwgit push -p` puts `EH-3311` in front. A branch with
+no such id is an error, never a guess. Put a bare `-p` last, after the path and
+the instructions, or it takes them for the id.
+
 ## Your own words for the message
 
 After the path you can add a sentence in quotes for the AI model, to steer
@@ -167,6 +173,10 @@ $ suwgit push
   pushed feature/csv-export
   merge request: https://gitlab.example.com/team/dashboard/-/merge_requests/new?merge_request%5Bsource_branch%5D=feature%2Fcsv-export
 ```
+
+With nothing to commit, `suwgit push` simply runs `git push`: a branch that
+only fast-forwarded onto a merge still goes out. The background service only
+pushes commits that are on no remote yet.
 
 The link is the one GitLab, GitHub, Gitea or Bitbucket sends back after the
 push. On GitLab it leads to the open merge request once there is one. If the
@@ -251,7 +261,7 @@ commit refused for a possible secret, and never force-pushes.
 | `suwgit register <folder>` | watch a repository; run again to change its settings: `--default-b2b <tenant>`, `--default-project <name>`, `--no-auto-commit` |
 | `suwgit unregister <folder>` | stop watching it |
 | `suwgit list` | the setup, every repository and whether it has changes, every client as `tenant, folder (project)`, and your mailboxes |
-| `suwgit commit [path] ["instructions"]` | commit now; `"…"` steers what the message says, `-p <ticket>` for a task id, `--b2b [tenant]` / `--project [name]` for client work, `-y` to skip the question, `--push` / `--no-push` |
+| `suwgit commit [path] ["instructions"]` | commit now; `"…"` steers what the message says, `-p <ticket>` for a task id (bare `-p`: from the branch name), `--b2b [tenant]` / `--project [name]` for client work, `-y` to skip the question, `--push` / `--no-push` |
 | `suwgit push [path] ["instructions"]` | commit now and push, then show the merge request link |
 | `suwgit report --tenant <tenant>` | the PDF report; see [above](#the-report) |
 | `suwgit add-mail [address]` / `remove-mail <address>` | add (or update) a mailbox reports can be sent from / forget one |

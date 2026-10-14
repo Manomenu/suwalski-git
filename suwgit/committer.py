@@ -43,6 +43,7 @@ def commit_repo(
     tenant: str = "",
     project: str = "",
     instructions: str = "",
+    push_anyway: bool = False,
 ) -> Result:
     """Commit everything in `root` under an LLM-written message, then push it.
 
@@ -81,6 +82,11 @@ def commit_repo(
 
     `instructions` go to the model with the diff, to steer what the message
     says; only `suwgit commit` and `push` have any.
+
+    `push_anyway` is `suwgit push` asked for by hand: a clean tree is then
+    pushed exactly as `git push` would, whether or not anything looks pending —
+    a branch that only fast-forwarded onto a merge has nothing "unpushed" by the
+    count above, and is still behind on its remote. The daemon never sets it.
     """
     log = logger()
     should_push = config.push if push is None else push
@@ -147,15 +153,19 @@ def commit_repo(
                 result = Result(root, True, "committed", message=message, commit=commit, reverts=undoes[0] if undoes else "")
             else:
                 pending = gitops.pending_commits(root) if should_push else 0
-                if not pending:
+                if should_push and push_anyway and not pending:
+                    log.info("%s: nothing to commit, pushing as asked", root)
+                    result = Result(root, False, "nothing to commit")
+                elif not pending:
                     # Nothing left to do is also what a repository looks like
                     # after you committed it yourself: whatever blocked suwgit
                     # is over, so the note must not outlive it.
                     log.info("%s: nothing to commit", root)
                     repolog.clear(root)
                     return Result(root, False, "nothing to commit")
-                log.info("%s: nothing to commit, but %d commit(s) not pushed yet", root, pending)
-                result = Result(root, False, f"{pending} commit(s) waiting to be pushed")
+                else:
+                    log.info("%s: nothing to commit, but %d commit(s) not pushed yet", root, pending)
+                    result = Result(root, False, f"{pending} commit(s) waiting to be pushed")
 
             if not should_push:
                 return result
