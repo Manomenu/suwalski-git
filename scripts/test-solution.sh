@@ -1,7 +1,3 @@
 #!/usr/bin/env bash
-# Brama jakości: ruff + pytest. Puszczaj przed każdym commitem.
-set -euo pipefail
-cd "$(dirname "$0")/.."
-uv run --with ruff ruff check .
-uv run --with ruff ruff format --check .
-uv run --with pytest python -m pytest tests -q
+# Brama jakości: to samo co `just check` — jedna brama dla Linuksa i Windowsa.
+exec "$(dirname "$0")/.internal/check.sh" "$@"

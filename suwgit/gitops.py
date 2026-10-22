@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
+from . import host
+
 # Fallback budget when no config is passed. The real one lives in the config,
 # because it depends entirely on the backend's context window — measured against
 # Qwen3-8B, code tokenises at 3.78 chars/token, so a 200,100-token
@@ -61,7 +63,9 @@ def _git_bytes(root: Path | None, *args: str, env: dict[str, str] | None = None)
         cmd += ["-C", str(root)]
     cmd += list(args)
     try:
-        done = subprocess.run(cmd, capture_output=True, check=False, env=env)
+        # No console window: a scheduled sweep on Windows runs under pythonw, and every
+        # git call (and every hook it runs) would flash one on screen.
+        done = subprocess.run(cmd, capture_output=True, check=False, env=env, **host.no_window())
     except OSError as exc:
         raise GitError(f"cannot run git: {exc}") from None
     if done.returncode != 0:

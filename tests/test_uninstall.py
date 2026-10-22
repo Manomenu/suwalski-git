@@ -18,7 +18,7 @@ def _installed(sandbox):
 
 def test_the_config_survives_a_plain_uninstall(sandbox, monkeypatch):
     _installed(sandbox)
-    monkeypatch.setattr(uninstall.install, "uninstall_service", list)
+    monkeypatch.setattr(uninstall.install, "uninstall_schedule", list)
     monkeypatch.setattr(uninstall.install, "unlink_from_path", list)
 
     assert uninstall.run(assume_yes=True) == 0
@@ -32,7 +32,7 @@ def test_the_config_survives_a_plain_uninstall(sandbox, monkeypatch):
 
 def test_purge_takes_the_config_and_the_key_too(sandbox, monkeypatch):
     _installed(sandbox)
-    monkeypatch.setattr(uninstall.install, "uninstall_service", list)
+    monkeypatch.setattr(uninstall.install, "uninstall_schedule", list)
     monkeypatch.setattr(uninstall.install, "unlink_from_path", list)
 
     assert uninstall.run(purge=True, assume_yes=True) == 0
@@ -63,7 +63,7 @@ def test_anything_other_than_yes_aborts(sandbox, monkeypatch):
 def test_y_proceeds(sandbox, monkeypatch):
     _installed(sandbox)
     monkeypatch.setattr("builtins.input", lambda _prompt: "y")
-    monkeypatch.setattr(uninstall.install, "uninstall_service", list)
+    monkeypatch.setattr(uninstall.install, "uninstall_schedule", list)
     monkeypatch.setattr(uninstall.install, "unlink_from_path", list)
 
     assert uninstall.run() == 0
@@ -90,3 +90,21 @@ def test_a_real_file_on_the_path_is_never_deleted(sandbox, monkeypatch):
 
     assert paths.BIN_LINK.exists()
     assert "left" in result[0]
+
+
+def test_every_launcher_and_the_schedule_are_listed_and_removed(sandbox, monkeypatch, capsys):
+    _installed(sandbox)
+    paths.BIN_DIR.mkdir(parents=True, exist_ok=True)
+    launcher = paths.BIN_DIR / "suwgit-launcher"
+    launcher.write_text("x")
+    done = []
+    monkeypatch.setattr(uninstall.install, "launchers", lambda: [launcher])
+    monkeypatch.setattr(uninstall.install, "schedule_label", lambda: "scheduled task 'suwgit'")
+    monkeypatch.setattr(uninstall.install, "uninstall_schedule", lambda: done.append("schedule") or [])
+    monkeypatch.setattr(uninstall.install, "unlink_from_path", lambda: done.append("launchers") or [])
+
+    assert uninstall.run(assume_yes=True) == 0
+
+    out = capsys.readouterr().out
+    assert str(launcher) in out and "scheduled task 'suwgit'" in out
+    assert done == ["schedule", "launchers"]

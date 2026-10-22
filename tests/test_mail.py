@@ -105,7 +105,7 @@ def _init(monkeypatch, answers, secret=""):
     _answers(monkeypatch, *answers)
     monkeypatch.setattr(initcmd.getpass, "getpass", lambda prompt="": secret)
     monkeypatch.setattr(install, "link_into_path", lambda: (True, "linked"))
-    monkeypatch.setattr(install, "install_service", lambda enabled: (True, "installed"))
+    monkeypatch.setattr(install, "install_schedule", lambda hours, enabled: (True, "installed"))
     monkeypatch.setattr(install, "path_contains_local_bin", lambda: True)
     assert initcmd.run() == 0
     return config.load()
@@ -160,7 +160,7 @@ def test_add_mail_and_remove_mail(sandbox, monkeypatch, capsys):
 def test_list_shows_the_mailboxes_and_where_reports_went(sandbox, monkeypatch, capsys):
     config.save(_config(MAILBOX, WORK))
     tenants.remember_mail("lokum", ["client@example.com"], "me@work.com")
-    monkeypatch.setattr(main.install, "service_status", lambda: "active")
+    monkeypatch.setattr(main.install, "schedule_status", lambda: "active")
     main.main(["list"])
     out = capsys.readouterr().out
     assert "me@example.com" in out and "me@work.com" in out

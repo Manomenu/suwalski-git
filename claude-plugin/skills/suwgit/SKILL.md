@@ -9,7 +9,7 @@ suwgit is a command-line tool, run through Bash. It commits a repository's
 uncommitted changes under a message written by the user's own LLM server, can
 mark a commit as work for a client (B2B), and builds PDF or JSON work reports
 from those commits. Source and docs: https://github.com/Manomenu/suwalski-git
-(`master` is Linux, `master-windows` is Windows).
+(one codebase for Linux and Windows).
 
 ## First: is it installed?
 
@@ -38,10 +38,10 @@ Linux (needs systemd, Python 3.12+, git):
 ! ~/repos/suwalski-git/bin/suwgit init
 ```
 
-Windows (Git Bash, Python 3.12+, Git for Windows):
+Windows (Git Bash, Python 3.12+, Git for Windows; `init` registers a Task Scheduler entry):
 
 ```
-! git clone -b master-windows https://github.com/Manomenu/suwalski-git ~/Repos/suwalski-git
+! git clone https://github.com/Manomenu/suwalski-git ~/Repos/suwalski-git
 ! ~/Repos/suwalski-git/bin/suwgit init
 ```
 

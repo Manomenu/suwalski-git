@@ -98,7 +98,7 @@ def test_init_asks_for_the_language_and_insists_on_a_known_one(sandbox, monkeypa
     queue = ["2", "http://vllm:8000/v1", "qwen", "", "", "", "", "Jan", "n", "de", "pl"]
     monkeypatch.setattr("builtins.input", lambda prompt="": queue.pop(0) if queue else "")
     monkeypatch.setattr(install, "link_into_path", lambda: (True, "linked"))
-    monkeypatch.setattr(install, "install_service", lambda enabled: (True, "installed"))
+    monkeypatch.setattr(install, "install_schedule", lambda hours, enabled: (True, "installed"))
     monkeypatch.setattr(install, "path_contains_local_bin", lambda: True)
     assert initcmd.run() == 0
     assert config_module.load().language == "pl"

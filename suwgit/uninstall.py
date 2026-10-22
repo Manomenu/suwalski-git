@@ -64,17 +64,18 @@ def remove(paths_to_remove: list[Path]) -> list[str]:
 
 def run(purge: bool = False, assume_yes: bool = False) -> int:
     doomed = runtime_targets() + (config_targets() if purge else [])
-    installed = paths.BIN_LINK.is_symlink() or paths.SERVICE_FILE.exists()
+    launchers = install.launchers()
+    schedule = install.schedule_label()
 
-    if not doomed and not installed:
+    if not doomed and not launchers and not schedule:
         print(f"\n{DIM}nothing to do — suwgit is not installed on this machine{RESET}\n")
         return 0
 
     print(f"\n{BOLD}suwgit uninstall{RESET} — this will remove:\n")
-    if paths.BIN_LINK.is_symlink():
-        print(f"  {paths.BIN_LINK}  {DIM}(PATH symlink){RESET}")
-    if paths.SERVICE_FILE.exists():
-        print(f"  {paths.SERVICE_FILE}  {DIM}(stopped and disabled first){RESET}")
+    for launcher in launchers:
+        print(f"  {launcher}  {DIM}(launcher on PATH){RESET}")
+    if schedule:
+        print(f"  {schedule}")
     for path in doomed:
         print(f"  {path}")
 
@@ -96,7 +97,7 @@ def run(purge: bool = False, assume_yes: bool = False) -> int:
             return 1
 
     print()
-    for line in install.uninstall_service() + install.unlink_from_path() + remove(doomed):
+    for line in install.uninstall_schedule() + install.unlink_from_path() + remove(doomed):
         print(f"  {line}" if line.startswith(YELLOW) else f"  {GREEN}✓{RESET} {line}")
 
     tail = "" if purge else " Your config is still there — `suwgit init` picks it straight back up."

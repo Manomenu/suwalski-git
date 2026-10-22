@@ -14,12 +14,11 @@ tracked file in a git repo, so the key lives beside the logs in ~/.local/state.
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from . import host, paths
 from . import language as lang
-from . import paths
 
 DEFAULT_INTERVAL_HOURS = 1.5
 # A thinking model reasons before it answers: qwen3-8b takes ~30 s on a small diff.
@@ -139,7 +138,7 @@ def write_api_key(api_key: str) -> None:
         paths.API_KEY_FILE.unlink(missing_ok=True)
         return
     paths.API_KEY_FILE.write_text(api_key + "\n", encoding="utf-8")
-    os.chmod(paths.API_KEY_FILE, 0o600)
+    host.keep_private(paths.API_KEY_FILE)
 
 
 def read_mail_passwords() -> dict[str, str]:
@@ -158,7 +157,7 @@ def write_mail_passwords(mailboxes: list[MailConfig]) -> None:
         paths.MAIL_PASSWORDS_FILE.unlink(missing_ok=True)
         return
     paths.MAIL_PASSWORDS_FILE.write_text(json.dumps(passwords, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.chmod(paths.MAIL_PASSWORDS_FILE, 0o600)
+    host.keep_private(paths.MAIL_PASSWORDS_FILE)
 
 
 def source_file() -> Path:
@@ -195,7 +194,8 @@ def load() -> Config:
             timeout_seconds=int(llm_raw.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)),
         ),
         interval_hours=float(raw.get("interval_hours", DEFAULT_INTERVAL_HOURS)),
-        open_on_system_start=bool(raw.get("open_on_system_start", True)),
+        # `scheduled` is what the Windows version called it before the two were one.
+        open_on_system_start=bool(raw.get("open_on_system_start", raw.get("scheduled", True))),
         push=bool(raw.get("push", False)),
         max_diff_chars=int(raw.get("max_diff_chars", DEFAULT_MAX_DIFF_CHARS)),
         report_author=str(raw.get("report_author", "")),

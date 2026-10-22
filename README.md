@@ -18,7 +18,8 @@ them into a PDF report.
 ## What you get
 
 - **Nothing left uncommitted.** Register a repository and forget it. Every
-  interval a background service commits whatever you have stopped working on.
+  interval a background job (a systemd service on Linux, a Task Scheduler
+  entry on Windows) commits whatever you have stopped working on.
   It waits while you are still editing.
 - **Messages worth reading.** Each commit says what changed, labelled `feature`,
   `bugfix`, `refactor` and so on, so you can find anything later.
@@ -120,7 +121,7 @@ suwgit register ~/projects/shop --default-b2b lokum --default-project "Lokum Sho
 | `suwgit commit` | an ordinary commit |
 | `suwgit commit --b2b` | client work for `lokum`, project Lokum Shop |
 | `suwgit push --b2b acme` | client work for `acme` instead |
-| the background service | client work for `lokum`, every time |
+| the background job | client work for `lokum`, every time |
 
 Without a default, a bare `--b2b` offers what you used last time in that
 repository and asks first. Enter confirms, and `-y` skips the question:
@@ -148,7 +149,7 @@ $ suwgit push -p EH-3311111
 
 The id goes in front of the title exactly as you typed it. The AI model never
 sees it, so it cannot get it wrong. The tracker links the commit to the task as
-usual. It works together with `--b2b`, and the background service adds no
+usual. It works together with `--b2b`, and the background job adds no
 prefix.
 
 A bare `-p` takes the id from the branch name: the first run of letters, a
@@ -212,7 +213,7 @@ $ suwgit push
 ```
 
 With nothing to commit, `suwgit push` simply runs `git push`: a branch that
-only fast-forwarded onto a merge still goes out. The background service only
+only fast-forwarded onto a merge still goes out. The background job only
 pushes commits that are on no remote yet.
 
 The link is the one GitLab, GitHub, Gitea or Bitbucket sends back after the
@@ -221,13 +222,19 @@ server sends no link, suwgit builds one for GitHub and GitLab.
 
 ## Install
 
-On Windows, use the
-[`master-windows`](https://github.com/Manomenu/suwalski-git/tree/master-windows)
-branch instead: the same tool, run by the Task Scheduler.
+suwgit runs on **Linux** and on **Windows**, from the same code. You need
+Python 3.12+, git, and a [vLLM](https://github.com/vllm-project/vllm) server,
+or anything else that speaks the OpenAI chat-completions API. There is nothing
+else to install. What differs is only what keeps it running in the background:
 
-You need Linux with systemd, Python 3.12+, git, and a
-[vLLM](https://github.com/vllm-project/vllm) server, or anything else that
-speaks the OpenAI chat-completions API. There is nothing else to install.
+| | Linux | Windows 10/11 |
+|---|---|---|
+| also needs | systemd (a user unit) | [Git for Windows](https://gitforwindows.org/); the Microsoft Store build of Python is fine |
+| the background job | a systemd user service running `suwgit daemon` | a Task Scheduler entry named `suwgit` running `suwgit sweep` every interval, while you are logged in |
+| `suwgit` on your PATH | a symlink in `~/.local/bin` | two small launchers in `~/.local/bin`: `suwgit` for Git Bash, `suwgit.cmd` for cmd and PowerShell |
+| run it from | any shell | Git Bash, cmd or PowerShell |
+
+Clone it and run `init` (in Git Bash on Windows):
 
 ```bash
 git clone https://github.com/Manomenu/suwalski-git ~/repos/suwalski-git
@@ -237,7 +244,9 @@ cd ~/repos/suwalski-git
 
 `init` asks for your server, how often to commit, whether to push, and your
 name for reports ("Prepared by"), and, if you want reports sent by e-mail, a
-mailbox to send them from (add more later with `suwgit add-mail`). It then sets up the background service. Run
+mailbox to send them from (add more later with `suwgit add-mail`). On Linux it
+also asks where the config lives (the home directory, or a GNU Stow dotfiles
+tree). It then puts `suwgit` on your PATH and sets up the background job. Run
 it again any time: every question offers your current answer, so Enter keeps
 it. Open a new terminal, then:
 
@@ -303,8 +312,20 @@ commit refused for a possible secret, and never force-pushes.
 | `suwgit push [path] ["hint"]` | commit now and push, then show the merge request link |
 | `suwgit report --tenant <tenant>` | the PDF report; see [above](#the-report) |
 | `suwgit add-mail [address]` / `remove-mail <address>` | add (or update) a mailbox reports can be sent from / forget one |
-| `suwgit logs [-n N] [-f]` | what the background service did |
+| `suwgit logs [-n N] [-f]` | what the background job did |
+| `suwgit sweep` | one pass over every repository, as the Windows scheduled task does (Linux: `suwgit daemon --once`) |
 | `suwgit uninstall [--purge]` | remove suwgit; your config stays unless `--purge` |
+
+The background job, when you want to look at it by hand:
+
+| | Linux | Windows (Git Bash) |
+|---|---|---|
+| its state | `systemctl --user status suwgit` | `MSYS_NO_PATHCONV=1 schtasks /Query /TN suwgit /V /FO LIST` |
+| run a pass now | `suwgit daemon --once` | `MSYS_NO_PATHCONV=1 schtasks /Run /TN suwgit` |
+
+With [`just`](https://github.com/casey/just) the same are recipes in the clone:
+`just install`, `just uninstall`, `just service` (Linux) or `just task` /
+`just task-run` (Windows), and `just check`, the quality gate for development.
 
 ## When something goes wrong
 
@@ -313,6 +334,12 @@ was spotted or the push was rejected, it leaves a `.suwgit.log` note in that
 repository saying why. The note disappears as soon as the problem is gone. A
 secret is never committed: the changes stay in your working tree for you to
 check.
+
+If a git hook in your repository needs a tool, that tool must be on the PATH
+the background job starts with: on Linux the PATH of the shell that ran
+`suwgit init` (re-run it after installing the tool), on Windows the **user PATH
+of Windows**, not only `~/.bashrc`, because a scheduled task never sees Git
+Bash's PATH.
 
 ## More
 

@@ -1,0 +1,51 @@
+name: ci
+
+# The gate runs on Linux and on Windows: one codebase, two systems. A push to any branch
+# proves the change; workflow_dispatch exists so a run can be repeated by hand without
+# inventing an empty commit.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch makes the older run irrelevant, so stop paying for it.
+# Master is the exception.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+# The floor for every job.
+permissions:
+  contents: read
+
+env:
+  # suwgit supports 3.12 up to 3.14 (pyproject.toml); the newest is what the tests run on.
+  UV_PYTHON: "3.14"
+
+jobs:
+  test:
+    strategy:
+      # One system failing says nothing about the other, so let both finish.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # Git Bash on Windows, bash on Linux: the gate is a bash script on both.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # check.sh does not scan history, but the tests build their own repositories and
+          # should not depend on how shallow this checkout is.
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      # Deliberately the same script the repo runs locally. CI that runs something else is
+      # CI that can disagree with your machine, and then neither of you is trustworthy.
+      # (shellcheck ships with the Linux runner; the Windows one reports SKIP for it.)
+      - run: ./scripts/.internal/check.sh

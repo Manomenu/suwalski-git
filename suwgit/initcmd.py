@@ -1,9 +1,10 @@
 """`suwgit init` — the interactive setup.
 
-Asks where the config should live, for the vLLM endpoint, how often to sweep,
-whether to start with the session, and whose name goes on reports; then puts
-suwgit on PATH and installs the systemd user unit. Re-runnable: every prompt
-offers the current value as default.
+Asks (on Linux) where the config should live, then for the vLLM endpoint, how
+often to sweep, whether the schedule is on, and whose name goes on reports; then
+puts suwgit on PATH and sets up the scheduler (systemd on Linux, the Task
+Scheduler on Windows; see `install.py`). Re-runnable: every prompt offers the
+current value as default.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import getpass
 from pathlib import Path
 
 from . import config as config_module
-from . import gitops, install, language, paths
+from . import gitops, host, install, language, paths
 from .config import DEFAULT_INTERVAL_HOURS, Config
 
 BOLD = "\033[1m"
@@ -114,6 +115,10 @@ def _ask_language(default: str) -> str:
             print(f"  {exc}")
 
 
+def _private_note() -> str:
+    return "" if host.is_windows() else " (chmod 600)"
+
+
 def _ask_location() -> bool:
     """True for dotfiles, False for the home directory. Defaults to whatever is in place."""
     default_dotfiles = paths.CONFIG_FILE.is_symlink() or paths.DOTFILES_CONFIG_FILE.exists()
@@ -154,16 +159,17 @@ def run() -> int:
     existing = config_module.load_or_default()
 
     print(f"\n{BOLD}suwgit init{RESET}\n")
-    use_dotfiles = _ask_location()
+    # The dotfiles tree is a GNU Stow setup, Linux only; Windows keeps the config in the profile.
+    use_dotfiles = False if host.is_windows() else _ask_location()
 
     print(f"\n{BOLD}vLLM server{RESET}")
     base_url = _ask("  Base URL (OpenAI-compatible, e.g. http://localhost:8000/v1)", existing.llm.base_url)
     model = _ask("  Model name", existing.llm.model)
     api_key = _ask("  API key (blank if the server does not check one)", existing.llm.api_key, allow_empty=True)
 
-    print(f"\n{BOLD}Daemon{RESET}")
+    print(f"\n{BOLD}Schedule{RESET}")
     interval_hours = _ask_hours(existing.interval_hours or DEFAULT_INTERVAL_HOURS)
-    open_on_system_start = _ask_yes_no("  Start with the system?", existing.open_on_system_start)
+    open_on_system_start = _ask_yes_no(f"  {install.autostart_question()}", existing.open_on_system_start)
     push = _ask_yes_no("  Push the branch after committing?", existing.push)
 
     print(f"\n{BOLD}Reports{RESET}")
@@ -196,20 +202,22 @@ def run() -> int:
     _, detail = _place_config(config, use_dotfiles)
     print(f"\n{GREEN}✓{RESET} {detail}")
     if api_key:
-        print(f"{GREEN}✓{RESET} API key kept out of the config, in {paths.API_KEY_FILE} (chmod 600)")
+        print(f"{GREEN}✓{RESET} API key kept out of the config, in {paths.API_KEY_FILE}{_private_note()}")
     if any(box.password for box in mailboxes):
-        print(f"{GREEN}✓{RESET} mail passwords kept out of the config, in {paths.MAIL_PASSWORDS_FILE} (chmod 600)")
+        print(f"{GREEN}✓{RESET} mail passwords kept out of the config, in {paths.MAIL_PASSWORDS_FILE}{_private_note()}")
 
     linked, detail = install.link_into_path()
     print(f"{GREEN}✓{RESET} {detail}" if linked else f"{YELLOW}!{RESET} {detail}")
 
-    installed, detail = install.install_service(open_on_system_start)
+    installed, detail = install.install_schedule(interval_hours, open_on_system_start)
     print(f"{GREEN}✓{RESET} {detail}" if installed else f"{YELLOW}!{RESET} {detail}")
 
     print(f"\n{BOLD}Next{RESET}")
     if not install.path_contains_local_bin():
-        print(f"  {YELLOW}!{RESET} {paths.BIN_DIR} is not on your PATH — add it to your shell rc first:")
-        print('      export PATH="$HOME/.local/bin:$PATH"')
+        first, *rest = install.path_hint()
+        print(f"  {YELLOW}!{RESET} {paths.BIN_DIR} {first}")
+        for line in rest:
+            print(f"      {line}")
 
     step = 1
     if use_dotfiles:

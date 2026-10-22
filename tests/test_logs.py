@@ -50,20 +50,20 @@ def test_a_trim_never_leaves_a_half_line(sandbox):
         assert len(line) == len("line 000000 ") + 80
 
 
-def _writer(count):
-    from suwgit import paths as child_paths
-
-    handler = CappedFileHandler(child_paths.LOG_FILE, max_bytes=20_000)
+def _writer(log_file, count):
+    # A spawned child starts fresh: the sandbox's monkeypatching does not reach it,
+    # so it is told where to write.
+    handler = CappedFileHandler(log_file, max_bytes=20_000)
     handler.setFormatter(logging.Formatter("%(message)s"))
     for i in range(count):
         _log(handler, f"pid{os.getpid()} line {i:04d} " + "y" * 60)
 
 
 def test_two_processes_writing_at_once_keep_the_cap(sandbox):
-    """The daemon and an interactive `suwgit commit` do exactly this."""
+    """A scheduled sweep and an interactive `suwgit commit` do exactly this."""
     paths.STATE_DIR.mkdir(parents=True, exist_ok=True)
-    ctx = multiprocessing.get_context("fork")
-    workers = [ctx.Process(target=_writer, args=(400,)) for _ in range(4)]
+    ctx = multiprocessing.get_context("spawn")  # the only start method Windows has
+    workers = [ctx.Process(target=_writer, args=(paths.LOG_FILE, 400)) for _ in range(4)]
     for worker in workers:
         worker.start()
     for worker in workers:

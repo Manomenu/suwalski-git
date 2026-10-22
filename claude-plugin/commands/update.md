@@ -16,8 +16,7 @@ Two parts, both by default; "tool" or "plugin" means only that one.
    on Linux. On Windows the launcher is a small generated script: read the clone
    path from it, or ask the user.
 2. `git -C <clone> status --porcelain` and `git -C <clone> branch --show-current`.
-   Pull only when the clone is clean and on `master` (Linux) or `master-windows`
-   (Windows): `git -C <clone> pull --ff-only`. If it has local changes, is on
+   Pull only when the clone is clean and on `master` (Linux and Windows alike): `git -C <clone> pull --ff-only`. If it has local changes, is on
    another branch, or cannot fast-forward, change nothing and tell the user why —
    it may be their own working copy.
 3. On Linux, after a pull that changed something, restart the background

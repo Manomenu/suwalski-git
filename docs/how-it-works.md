@@ -6,9 +6,17 @@ built, and where everything lives. For using it, see the [README](../README.md).
 
 ## Design rules
 
-- **Standard library only.** The daemon runs as a bare `python3` under systemd;
-  no venv has to stay healthy for it. `pytest` is a dev dependency and nothing
-  else is.
+- **Standard library only.** The background job runs a bare `python3` under
+  systemd, or a bare `pythonw.exe` under the Task Scheduler; no venv has to stay
+  healthy for it. `pytest` is a dev dependency and nothing else is.
+- **One codebase for Linux and Windows.** Everything is shared except two small
+  seams, picked at runtime by the OS: `host.py` (a lock, `chmod 600`, "no console
+  window" for subprocesses) and `install.py` (the scheduler and the PATH
+  launchers: `install_systemd.py` or `install_windows.py`). See
+  [Linux and Windows](#linux-and-windows).
+- **Windowless.** Every subprocess gets `CREATE_NO_WINDOW` on Windows
+  (`host.no_window()`), so a sweep under `pythonw` never flashes a console. Git
+  output is read as bytes and decoded as UTF-8, never the ANSI code page.
 - **Plain `git` subprocesses**, no git library, so a machine with git is enough.
 - **One code path for every commit.** `suwgit commit`, `suwgit push` and the
   daemon all go through `committer.commit_repo`, so they make exactly the same
@@ -22,7 +30,7 @@ built, and where everything lives. For using it, see the [README](../README.md).
 |---|---|
 | `main.py` | the command line: parses arguments, resolves `--b2b` / `--project`, prints results |
 | `committer.py` | the one operation: look at a dirty repository, ask the model, commit, push |
-| `daemon.py` | the loop systemd runs: one sweep over the registry every `interval_hours` |
+| `daemon.py` | the loop systemd runs: one sweep over the registry every `interval_hours`; `suwgit sweep` (the Task Scheduler's command) runs just one pass |
 | `llm.py` | the request to the vLLM server, the response schema, the prompts, parsing the answer |
 | `gitops.py` | every git subprocess: status, diff, commit, push, log |
 | `b2b.py` | the B2B commit format — writing it, and reading it back for a report |
@@ -30,8 +38,10 @@ built, and where everything lives. For using it, see the [README](../README.md).
 | `tenants.py` | the tenant index and the last `--b2b` used by hand |
 | `config.py` | reading and writing `config.json`, the registry of repositories |
 | `repolog.py` | the `.suwgit.log` blocker note inside a repository |
-| `locking.py` | one suwgit process per repository at a time (`flock`) |
-| `initcmd.py`, `install.py`, `uninstall.py` | setup: PATH symlink, systemd user unit |
+| `locking.py` | one suwgit process per repository at a time (`flock`, or a `msvcrt` byte-range lock on Windows) |
+| `host.py` | the OS primitives: the file lock, `chmod 600`, no console window for subprocesses |
+| `initcmd.py`, `uninstall.py` | setup and removal |
+| `install.py`, `install_systemd.py`, `install_windows.py` | `suwgit` on PATH and the scheduler: a symlink and a systemd user unit on Linux; two launchers and a Task Scheduler entry on Windows. `install.py` hands each call to the one that fits |
 | `logs.py`, `paths.py` | the capped log file, file locations |
 
 ## Making a commit
@@ -354,8 +364,8 @@ writes nothing.
 | `model` | the model name the server reports |
 | `api_key` | stored apart from this file (see below); may stay empty for a local server |
 | `timeout_seconds` | how long to wait for an answer |
-| `interval_hours` | how often the daemon sweeps |
-| `open_on_system_start` | whether the systemd unit is enabled |
+| `interval_hours` | how often the background job sweeps (Windows: rounded to whole minutes — re-run `suwgit init` after changing it) |
+| `open_on_system_start` | whether the systemd unit is enabled / the Task Scheduler entry runs (off keeps it registered, disabled). The Windows version called it `scheduled`; that name still loads |
 | `push` | push after each commit, sweeps included |
 | `max_diff_chars` | how much diff (in characters) the model reads, after lockfiles, deleted and binary files are summarized; keep it well under the model's context window (a lockfile is about 2 characters a token) |
 | `report_author` | the "Prepared by" name on reports; empty means the commits' author names |
@@ -363,24 +373,61 @@ writes nothing.
 | `mailboxes` | the mailboxes `report --mail` can send from; `init` and `add-mail` add them. Passwords are never stored here (see below). A config with one `mail` object, as before, still loads |
 | `repos` | the registry, written by `register`; each entry has its own `language`. A bare path, as older versions wrote it, still loads |
 
-`init` can keep the config in a [GNU Stow](https://www.gnu.org/software/stow/)
+On Linux, `init` can keep the config in a [GNU Stow](https://www.gnu.org/software/stow/)
 dotfiles tree instead; writes then follow the stow symlink into the tracked file.
+Windows has no such question.
 
 ## Where things live
 
 | what | where |
 |---|---|
 | config | `~/.config/suwgit/config.json`, or a stow symlink into the dotfiles |
-| API key | `~/.local/state/suwgit/api_key`, chmod 600 — never in the config, which may be tracked by git |
+| API key | `~/.local/state/suwgit/api_key`, chmod 600 (Linux) — never in the config, which may be tracked by git |
 | log | `~/.local/state/suwgit/suwgit.log`, hard-capped at 5 MB |
 | locks | `~/.local/state/suwgit/locks/` |
-| mail passwords | `~/.local/state/suwgit/mail_passwords.json`, by mailbox address, chmod 600 — never in the config |
+| mail passwords | `~/.local/state/suwgit/mail_passwords.json`, by mailbox address, chmod 600 (Linux) — never in the config |
 | last mailings | `~/.local/state/suwgit/last-mail.json`: each tenant's last recipients and mailbox |
 | tenant index | `~/.local/state/suwgit/tenants.json` — kept by `uninstall`, removed by `--purge` |
 | last `--b2b` | `~/.local/state/suwgit/last-b2b.json`, per repository |
 | blocker notes | `.suwgit.log` in the repository itself |
-| unit | `~/.config/systemd/user/suwgit.service`, with the installing shell's `PATH` baked in so git hooks find their tools |
+| unit (Linux) | `~/.config/systemd/user/suwgit.service`, with the installing shell's `PATH` baked in so git hooks find their tools |
+| launchers (Windows) | `~/.local/bin/suwgit` (Git Bash), `~/.local/bin/suwgit.cmd` (cmd, PowerShell) |
+| schedule (Windows) | Task Scheduler → Task Scheduler Library → `suwgit` |
 
+On Windows `~` is `%USERPROFILE%`, and deliberately not `%APPDATA%`: the Microsoft
+Store build of Python redirects writes there into its own package folder, so the
+config you open in an editor would not be the one suwgit reads.
+
+## Linux and Windows
+
+One codebase; the two systems differ in four places, all behind a function:
+
+| | Linux | Windows |
+|---|---|---|
+| clock | systemd user unit, `suwgit daemon` loops and sleeps `interval_hours` | Task Scheduler entry, every `interval_hours`, runs `suwgit sweep` (one pass, then exits) |
+| `suwgit` on PATH | symlink `~/.local/bin/suwgit` → `bin/suwgit` | generated `suwgit` (Git Bash) and `suwgit.cmd` (cmd/PowerShell) that run `bin/suwgit.py` with the Python that ran `init`; never overwrites a file that is not ours |
+| lock | `fcntl.flock` | `msvcrt.locking` byte-range lock, polled when it must wait |
+| secrets files | chmod 600 | the profile folder is already private |
+
+The Windows task runs as you, only while you are logged in (no stored password),
+under `pythonw.exe`. A sweep missed while the machine was asleep runs as soon as
+it wakes; one still running when the next is due is left alone, and one stuck
+for two hours is stopped. Git hooks run as usual; a tool they need must be on the
+**Windows** user PATH, because a scheduled task never sees Git Bash's PATH. The
+launchers and the task carry the path of the Python that ran `suwgit init`, so
+re-run it after reinstalling Python.
+
+Other things that follow from Windows and hold on both systems: nothing is
+written into a user's repository in text mode (`.gitignore` gets its line as bytes,
+in the file's own line ending, so a CRLF checkout does not show every line as
+changed); the log is trimmed in place under the lock, never by a rename (Windows
+refuses to rename a file someone has open, as `suwgit logs -f` does); and
+`suwgit logs` is written in Python (no `tail`).
+
+Why not WSL: git on `/mnt/c` goes through WSL's file bridge and is slow on a big
+repository; WSL's git has its own config, credentials and line-ending settings
+beside the Windows ones; and a cron job inside WSL only runs while the WSL VM
+happens to be up.
 ## The Claude Code plugin
 
 `claude-plugin/` is a Claude Code plugin, and `.claude-plugin/marketplace.json`
@@ -411,6 +458,15 @@ change, start a session with `claude --plugin-dir ./claude-plugin`.
 
 ## Tests
 
-`./scripts/test-solution.sh` runs ruff (lint and format check) and pytest. Tests
-build real git repositories in a temporary directory and point every suwgit path
-at a sandbox, so they never touch the real config, state or systemd.
+`./scripts/.internal/check.sh` (also `just check`, and `scripts/test-solution.sh`,
+which calls it) runs ruff, the format check, the lockfile check, pytest and
+shellcheck. Tests build real git repositories in a temporary directory and point
+every suwgit path at a sandbox, so they never touch the real config, state,
+systemd or Task Scheduler.
+
+The Windows implementations are tested where they can be without Windows: the
+task XML, the launchers, the `schtasks` command lines and the status parsing run
+anywhere, with only `subprocess` or `host.is_windows` replaced. What needs
+Windows itself (the `msvcrt` lock) is marked
+`skipif(sys.platform != "win32")`. CI (`.github/workflows/ci.yml`) runs the same
+gate on `ubuntu-latest` and `windows-latest`.

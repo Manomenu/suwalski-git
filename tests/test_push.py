@@ -31,7 +31,7 @@ def _config(push=True):
 
 
 def _remote_log(remote, ref="HEAD"):
-    out = subprocess.run(["git", "-C", str(remote), "log", "--oneline", ref], capture_output=True, text=True, check=False)
+    out = subprocess.run(["git", "--git-dir", str(remote), "log", "--oneline", ref], capture_output=True, text=True, check=False)
     return out.stdout
 
 

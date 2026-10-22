@@ -104,7 +104,7 @@ def cmd_list(_args: argparse.Namespace) -> int:
 
     print(f"{BOLD}config{RESET}   {config_module.source_file()}")
     print(f"{BOLD}model{RESET}    {config.llm.model or '—'} {DIM}@ {config.llm.base_url or '—'}{RESET}")
-    print(f"{BOLD}sweep{RESET}    every {config.interval_hours:g} h   {DIM}service: {install.service_status()}{RESET}")
+    print(f"{BOLD}sweep{RESET}    every {config.interval_hours:g} h   {DIM}schedule: {install.schedule_status()}{RESET}")
     print(f"{BOLD}push{RESET}     {'yes, after every commit' if config.push else 'no, commits stay local'}")
     print(f"{BOLD}language{RESET} {language.name(config.language)} {DIM}— for repositories registered without --language{RESET}")
     print(f"{BOLD}log{RESET}      {paths.LOG_FILE}")
@@ -544,7 +544,7 @@ def cmd_report(args: argparse.Namespace) -> int:
     name = report.default_filename(args.tenant, today)
     target = Path(args.output or name).expanduser()
     # A folder — existing, or written with a trailing slash — gets the default name inside it.
-    if args.output and (target.is_dir() or args.output.endswith("/")):
+    if args.output and (target.is_dir() or args.output.endswith(("/", "\\"))):
         target = target / name
     target = target.resolve()
     try:
@@ -586,6 +586,14 @@ def cmd_report(args: argparse.Namespace) -> int:
             tenants.remember_mail(args.tenant, recipients, mailbox.sender)
         except OSError:
             pass  # only a convenience for the next bare --mail
+    return 0
+
+
+def cmd_sweep(_args: argparse.Namespace) -> int:
+    committed, pushed, deferred = daemon.run_once()
+    summary = f"{committed} committed, {pushed} pushed, {deferred} still being edited"
+    logs.logger().info("sweep: done (%s)", summary)
+    print(f"{summary}  {DIM}(details: suwgit logs){RESET}")
     return 0
 
 
@@ -714,7 +722,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("init", help="interactive setup: LLM, interval, autostart, PATH").set_defaults(func=cmd_init)
+    sub.add_parser("init", help="interactive setup: LLM, interval, autostart or schedule, PATH; safe to run again").set_defaults(
+        func=cmd_init
+    )
 
     register = sub.add_parser("register", help="watch a repository (it must have a git remote); again to change its settings")
     register.add_argument("folder")
@@ -850,16 +860,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report_cmd.set_defaults(func=cmd_report)
 
+    sub.add_parser("sweep", help="one pass over every registered repository (the Task Scheduler runs this)").set_defaults(func=cmd_sweep)
+
     daemon_cmd = sub.add_parser("daemon", help="the background loop (systemd runs this)")
     daemon_cmd.add_argument("--once", action="store_true", help="one sweep, then exit")
     daemon_cmd.set_defaults(func=cmd_daemon)
 
-    uninstall_cmd = sub.add_parser("uninstall", help="remove suwgit from PATH and systemd, and its logs")
+    uninstall_cmd = sub.add_parser("uninstall", help="remove suwgit from PATH and the scheduler (systemd or Task Scheduler), and its logs")
     uninstall_cmd.add_argument("--purge", action="store_true", help="also delete the config and the API key")
     uninstall_cmd.add_argument("-y", "--yes", action="store_true", help="skip the confirmation")
     uninstall_cmd.set_defaults(func=cmd_uninstall)
 
-    logs_cmd = sub.add_parser("logs", help="show the daemon log")
+    logs_cmd = sub.add_parser("logs", help="show the log of the daemon and the scheduled sweeps")
     logs_cmd.add_argument("-n", "--lines", type=int, default=200)
     logs_cmd.add_argument("-f", "--follow", action="store_true")
     logs_cmd.set_defaults(func=cmd_logs)

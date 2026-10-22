@@ -57,7 +57,7 @@ def test_register_is_idempotent_and_sorted(sandbox):
     assert config_module.register(config, Path("/b/repo")) == "added"
     assert config_module.register(config, Path("/a/repo")) == "added"
     assert config_module.register(config, Path("/a/repo")) == "unchanged"
-    assert [e.path for e in config.repos] == ["/a/repo", "/b/repo"]
+    assert [e.path for e in config.repos] == [str(Path("/a/repo")), str(Path("/b/repo"))]
     assert config_module.unregister(config, Path("/a/repo")) is True
     assert config_module.unregister(config, Path("/a/repo")) is False
 
@@ -92,3 +92,12 @@ def test_an_older_config_with_bare_paths_still_loads(sandbox):
     paths.CONFIG_FILE.write_text('{"repos": ["/a/repo"]}')
     entry = config_module.load().entry(Path("/a/repo"))
     assert (entry.auto_commit, entry.default_tenant) == (True, "")
+
+
+def test_the_windows_name_of_the_schedule_switch_still_loads(sandbox):
+    """Before the two versions were one, the Windows config called `open_on_system_start` `scheduled`."""
+    paths.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    paths.CONFIG_FILE.write_text('{"scheduled": false}')
+    assert config_module.load().open_on_system_start is False
+    paths.CONFIG_FILE.write_text('{"scheduled": false, "open_on_system_start": true}')
+    assert config_module.load().open_on_system_start is True

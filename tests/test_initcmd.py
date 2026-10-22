@@ -11,7 +11,7 @@ def _run(monkeypatch, answers):
     queue = list(answers)
     monkeypatch.setattr("builtins.input", lambda prompt="": queue.pop(0) if queue else "")
     monkeypatch.setattr(install, "link_into_path", lambda: (True, "linked"))
-    monkeypatch.setattr(install, "install_service", lambda enabled: (True, "installed"))
+    monkeypatch.setattr(install, "install_schedule", lambda hours, enabled: (True, "installed"))
     monkeypatch.setattr(install, "path_contains_local_bin", lambda: True)
     assert initcmd.run() == 0
     return config_module.load()
@@ -62,3 +62,26 @@ def test_dotfiles_mode_keeps_the_config_when_stow_folded_the_whole_folder(sandbo
 
     assert config_module.paths.DOTFILES_CONFIG_FILE.exists()
     assert loaded.report_author == "Piotr Gugnowski"
+
+
+def test_windows_is_not_asked_where_the_config_lives(sandbox, monkeypatch):
+    """The dotfiles tree is a Linux (GNU Stow) setup: on Windows the first answer is already the server."""
+    monkeypatch.setattr(initcmd.host, "is_windows", lambda: True)
+    config_module.save(_existing())
+    loaded = _run(monkeypatch, ["http://other:8000/v1"])
+
+    assert loaded.llm.base_url == "http://other:8000/v1"
+    assert config_module.paths.CONFIG_FILE.exists()
+
+
+def test_the_schedule_gets_the_interval_and_the_switch(sandbox, monkeypatch):
+    seen = []
+    monkeypatch.setattr(install, "install_schedule", lambda hours, enabled: seen.append((hours, enabled)) or (True, "installed"))
+    monkeypatch.setattr(install, "link_into_path", lambda: (True, "linked"))
+    monkeypatch.setattr(install, "path_contains_local_bin", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "")
+    monkeypatch.setattr(initcmd.host, "is_windows", lambda: True)
+    config_module.save(_existing())
+
+    assert initcmd.run() == 0
+    assert seen == [(1.0, True)]
