@@ -282,6 +282,7 @@ Then ask in plain words, in any language, or use the commands:
 | `/suwgit:push` | `/suwgit:push client work for lokum, project Lokum Shop` |
 | `/suwgit:list` | `/suwgit:list which repos have changes?` |
 | `/suwgit:report` | `/suwgit:report lokum for September, with hours` |
+| `/suwgit:chain` | `/suwgit:chain` — where the MR chain stands |
 | `/suwgit:update` | `/suwgit:update` — suwgit and the plugin to the latest version |
 
 To update both suwgit and the plugin later, run `/suwgit:update`. Or do it by
@@ -310,6 +311,8 @@ commit refused for a possible secret, and never force-pushes.
 | `suwgit list` | the setup, every repository and whether it has changes, every client as `tenant, folder (project)`, and your mailboxes |
 | `suwgit commit [path] ["hint"]` | commit now; `"…"` steers what the message says, `-p <ticket>` for a task id (bare `-p`: from the branch name), `-i` for how-to-test and how-to-review checklists, `--b2b [tenant]` / `--project [name]` for client work, `-y` to skip the question, `--push` / `--no-push` |
 | `suwgit push [path] ["hint"]` | commit now and push, then show the merge request link |
+| `suwgit chain status [path]` | a chain of stacked merge requests ([git-town](https://github.com/git-town/git-town) order): pushed? needs merging up? where does each MR point? Needs `glab` (GitLab) or `gh` (GitHub) for the requests; see [docs](docs/how-it-works.md#merge-request-chains) |
+| `suwgit chain fix-targets [path] [-y]` | point each open MR of the chain at the previous branch, after one confirmation |
 | `suwgit report --tenant <tenant>` | the PDF report; see [above](#the-report) |
 | `suwgit add-mail [address]` / `remove-mail <address>` | add (or update) a mailbox reports can be sent from / forget one |
 | `suwgit logs [-n N] [-f]` | what the background job did |

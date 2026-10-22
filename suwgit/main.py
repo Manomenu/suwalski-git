@@ -12,7 +12,7 @@ import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from . import b2b, daemon, gitops, initcmd, install, language, logs, mailer, paths, picker, report, tenants, uninstall
+from . import b2b, chain, daemon, gitops, initcmd, install, language, logs, mailer, mrs, paths, picker, report, tenants, uninstall
 from . import config as config_module
 from .committer import commit_repo
 from .llm import LlmUnavailable, summarize_project
@@ -589,6 +589,65 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _chain_of(path: str) -> tuple[Path, list[str]]:
+    root = gitops.find_repo_root(Path(path))
+    return root, chain.read_chain(root)
+
+
+def cmd_chain_status(args: argparse.Namespace) -> int:
+    try:
+        root, names = _chain_of(args.path)
+        chain_links = chain.links(root, names)
+    except (gitops.GitError, chain.ChainError) as exc:
+        return _fail(str(exc))
+
+    found, tool, note = None, None, ""
+    try:
+        tool = mrs.tool_for(root)
+        found = chain.find_mrs(root, tool, names)
+    except mrs.MrError as exc:
+        note = f"merge requests not shown: {exc}"
+    print(chain.render(chain_links, found, tool))
+    print(f"{DIM}origin as of the last fetch{RESET}")
+    if note:
+        print(f"{RED}!{RESET} {note}", file=sys.stderr)
+    return 0
+
+
+def cmd_chain_fix_targets(args: argparse.Namespace) -> int:
+    try:
+        root, names = _chain_of(args.path)
+        tool = mrs.tool_for(root)
+        found = chain.find_mrs(root, tool, names)
+    except (gitops.GitError, chain.ChainError, mrs.MrError) as exc:
+        return _fail(str(exc))
+
+    wrong = chain.wrong_targets(names, found)
+    if not wrong:
+        print(f"{GREEN}✓{RESET} every merge request targets the previous branch of the chain")
+        return 0
+    for branch, target in wrong.items():
+        mr = found[branch]
+        assert mr is not None  # wrong_targets lists only branches that have one
+        print(f"{mr.label(tool)}: target {mr.target} → {target}  {DIM}({branch}){RESET}")
+    if not args.yes and not _confirm("Change these targets?", default=False):
+        print("nothing changed")
+        return 0
+
+    failed = 0
+    for branch, target in wrong.items():
+        mr = found[branch]
+        assert mr is not None
+        try:
+            mrs.retarget(root, tool, mr, target)
+        except mrs.MrError as exc:
+            failed += 1
+            print(f"{RED}✗{RESET} {mr.label(tool)}: {exc}", file=sys.stderr)
+        else:
+            print(f"{GREEN}✓{RESET} {mr.label(tool)} now targets {target}")
+    return 1 if failed else 0
+
+
 def cmd_sweep(_args: argparse.Namespace) -> int:
     committed, pushed, deferred = daemon.run_once()
     summary = f"{committed} committed, {pushed} pushed, {deferred} still being edited"
@@ -859,6 +918,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="the PDF file, or a folder to put it in (default: <tenant>--<today>.pdf in the current folder)",
     )
     report_cmd.set_defaults(func=cmd_report)
+
+    chain_cmd = sub.add_parser("chain", help="a chain of stacked merge requests (the order is git-town's)")
+    chain_sub = chain_cmd.add_subparsers(dest="chain_command", required=True)
+    chain_status = chain_sub.add_parser(
+        "status", help="the chain from the current branch: pushed? needs merging up? where each merge request points"
+    )
+    chain_status.add_argument("path", nargs="?", default=".", help="a folder in the repository (default: the current folder)")
+    chain_status.set_defaults(func=cmd_chain_status)
+    chain_fix = chain_sub.add_parser("fix-targets", help="point each open merge request of the chain at the previous branch")
+    chain_fix.add_argument("path", nargs="?", default=".", help="a folder in the repository (default: the current folder)")
+    chain_fix.add_argument("-y", "--yes", action="store_true", help="skip the confirmation")
+    chain_fix.set_defaults(func=cmd_chain_fix_targets)
 
     sub.add_parser("sweep", help="one pass over every registered repository (the Task Scheduler runs this)").set_defaults(func=cmd_sweep)
 

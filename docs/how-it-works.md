@@ -33,6 +33,7 @@ built, and where everything lives. For using it, see the [README](../README.md).
 | `daemon.py` | the loop systemd runs: one sweep over the registry every `interval_hours`; `suwgit sweep` (the Task Scheduler's command) runs just one pass |
 | `llm.py` | the request to the vLLM server, the response schema, the prompts, parsing the answer |
 | `gitops.py` | every git subprocess: status, diff, commit, push, log |
+| `chain.py`, `mrs.py` | `suwgit chain`: the chain read from git-town's config with its ahead/behind, and the merge requests asked of `glab` / `gh` |
 | `b2b.py` | the B2B commit format — writing it, and reading it back for a report |
 | `report.py` | the PDF report, written by hand |
 | `tenants.py` | the tenant index and the last `--b2b` used by hand |
@@ -428,6 +429,31 @@ Why not WSL: git on `/mnt/c` goes through WSL's file bridge and is slow on a big
 repository; WSL's git has its own config, credentials and line-ending settings
 beside the Windows ones; and a cron job inside WSL only runs while the WSL VM
 happens to be up.
+## Merge request chains
+
+A chain is a row of branches, each one's merge request targeting the one before it. Two
+read-mostly commands help keep it straight; the merging itself stays git-town's
+(`git town sync --stack` with `sync-feature-strategy = merge`), so there is no merge
+machinery here and nothing is ever rebased or force-pushed.
+
+- `suwgit chain status [path]` walks the parents from the current branch down
+  (`git config git-town-branch.<branch>.parent`, which `git town append` / `set-parent`
+  write; suwgit keeps no order of its own) and prints one row per branch, base first: its state against
+  `origin/<branch>` (as of the last fetch, or "not pushed"), against its parent
+  ("merge up" when the parent has commits it lacks) and its open merge request with its
+  target, marked when that is not the previous branch. It fails only when the chain cannot
+  be read; with no `glab` / `gh` it still prints the git part and says why the requests are missing.
+- `suwgit chain fix-targets [path] [-y]` lists each open merge request aimed at the wrong
+  branch (`!12: target main → feature/a`) and retargets them after one confirmation. It never
+  opens or closes a merge request.
+
+The host is the one `origin` points at: GitLab through `glab` (`glab mr list --source-branch B -F json`,
+`glab mr update N --target-branch T`; glab 1.x), GitHub through `gh` (`gh pr list --head B --json ...`,
+`gh pr edit N --base T`). Another host gets "only GitLab and GitHub are supported". suwgit holds no token:
+whoever is logged in to the CLI acts. Reading the chain needs only git; `git town` is what writes it.
+The Claude Code plugin teaches the rule that goes with it (`skills/mr-chain`): a change to code an earlier
+branch owns is made in that branch and merged up.
+
 ## The Claude Code plugin
 
 `claude-plugin/` is a Claude Code plugin, and `.claude-plugin/marketplace.json`
@@ -440,6 +466,7 @@ in the repository root makes the repository its marketplace. It holds no code:
 - `commands/{commit,push,list,report}.md` are `/suwgit:commit` and the others.
   Each takes free text as `$ARGUMENTS`, and may run `suwgit` (and `jq` for
   reports) without a permission prompt.
+- `skills/mr-chain/SKILL.md` and `commands/chain.md` (`/suwgit:chain`) are the MR-chain skill and its status command, see [Merge request chains](#merge-request-chains).
 - `commands/update.md` is `/suwgit:update`: a fast-forward pull of a clean clone
   (and a service restart on Linux), then `claude plugin marketplace update` and
   `claude plugin update`.

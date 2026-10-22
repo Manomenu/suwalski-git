@@ -322,6 +322,36 @@ def ticket_in_branch(branch: str) -> str:
     return found.group(0).upper() if found else ""
 
 
+def config_value(root: Path, key: str) -> str:
+    """One value of git's configuration, or "" when it is not set."""
+    try:
+        return _git(root, "config", "--get", key).strip()
+    except GitError:
+        return ""
+
+
+def ref_exists(root: Path, ref: str) -> bool:
+    try:
+        _git(root, "rev-parse", "--verify", "--quiet", ref)
+    except GitError:
+        return False
+    return True
+
+
+def ahead_behind(root: Path, base: str, tip: str) -> tuple[int, int]:
+    """(commits `tip` has that `base` lacks, commits `base` has that `tip` lacks)."""
+    left, right = _git(root, "rev-list", "--left-right", "--count", f"{base}...{tip}").split()
+    return int(right), int(left)
+
+
+def remote_url(root: Path, remote: str) -> str:
+    """What `remote` points at, or "" when there is no such remote."""
+    try:
+        return _git(root, "remote", "get-url", remote).strip()
+    except GitError:
+        return ""
+
+
 def upstream_of(root: Path, branch: str) -> str | None:
     try:
         return _git(root, "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}").strip() or None
