@@ -170,3 +170,72 @@ def test_a_bare_prefix_takes_the_ticket_id_from_the_branch(sandbox, tmp_path, mo
     assert seen["prefix"] == "EH-3311" and seen["push_anyway"] is True
     main.main(["commit", str(repo), "-p"])
     assert seen["push_anyway"] is False
+
+
+def _merge_in_progress(tmp_path, conflict):
+    """A repository in the middle of merging `topic` into main; conflicting when asked."""
+    repo = _repo(tmp_path / "repo")
+    gitops.commit_all(repo, "[chore] init")
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+    git("checkout", "-qb", "topic")
+    (repo / "a.txt").write_text("topic")
+    (repo / "b.txt").write_text("b")
+    git("add", "-A")
+    git("commit", "-qm", "add the topic work")
+    git("checkout", "-q", "main")
+    (repo / "a.txt").write_text("main" if conflict else "hi")
+    git("commit", "-qam", "main moves on", "--allow-empty")
+    subprocess.run(["git", "-C", str(repo), "merge", "--no-commit", "--no-ff", "topic"], check=False, capture_output=True)
+    return repo
+
+
+def test_a_resolved_merge_is_committed_with_both_parents(sandbox, tmp_path, monkeypatch):
+    repo = _merge_in_progress(tmp_path, conflict=False)
+    seen = []
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree, **_: seen.append(tree) or Suggestion("[chore] merged topic"))
+
+    result = committer.commit_repo(_config(), repo, finish_merge=True)
+
+    assert result.committed
+    parents = subprocess.run(
+        ["git", "-C", str(repo), "log", "-1", "--format=%P"], capture_output=True, text=True, check=True
+    ).stdout.split()
+    assert len(parents) == 2
+    assert "Merge branch 'topic'" in seen[0].merge
+    assert "add the topic work" in seen[0].merge
+
+
+def test_the_daemon_never_commits_a_merge(sandbox, tmp_path, monkeypatch):
+    repo = _merge_in_progress(tmp_path, conflict=False)
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree, **_: Suggestion("[chore] nope"))
+
+    result = committer.commit_repo(_config(), repo)
+
+    assert result.committed is False
+    assert "MERGE_HEAD in progress" in result.reason
+
+
+def test_a_merge_with_conflicts_names_the_files(sandbox, tmp_path, monkeypatch):
+    repo = _merge_in_progress(tmp_path, conflict=True)
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree, **_: Suggestion("[chore] nope"))
+
+    result = committer.commit_repo(_config(), repo, finish_merge=True)
+
+    assert result.committed is False
+    assert "unresolved conflicts: a.txt" in result.reason
+
+
+def test_other_operations_in_progress_are_still_refused_by_hand(sandbox, tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    gitops.commit_all(repo, "[chore] init")
+    (repo / "a.txt").write_text("changed")
+    (repo / ".git" / "CHERRY_PICK_HEAD").write_text("deadbeef")
+    monkeypatch.setattr(committer, "suggest_commit_message", lambda cfg, tree, **_: Suggestion("[chore] nope"))
+
+    result = committer.commit_repo(_config(), repo, finish_merge=True)
+
+    assert result.committed is False
+    assert "CHERRY_PICK_HEAD in progress" in result.reason

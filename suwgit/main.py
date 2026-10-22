@@ -313,7 +313,8 @@ def cmd_commit(args: argparse.Namespace) -> int:
             return _fail(
                 f"nothing committed — name it instead:  suwgit {args.command} --b2b <tenant> --project <name>   (-y skips this question)"
             )
-    print(f"{DIM}asking {config.llm.model or 'the model'} about {root}…{RESET}")
+    if gitops.is_dirty(root) or gitops.in_progress_operation(root) == "MERGE_HEAD":  # a clean tree never reaches the model
+        print(f"{DIM}asking {config.llm.model or 'the model'} about {root}…{RESET}")
     result = commit_repo(
         config,
         root,
@@ -325,6 +326,7 @@ def cmd_commit(args: argparse.Namespace) -> int:
         push_anyway=push is True,
         review=args.review,
         language=config.language_of(root),
+        finish_merge=True,
     )
     if tenant and result.committed and not result.reverts:
         try:
@@ -759,7 +761,9 @@ def build_parser() -> argparse.ArgumentParser:
     remove_mail.set_defaults(func=cmd_remove_mail)
 
     commit = sub.add_parser("commit", help="commit the closest repository above a path, right now")
-    commit.add_argument("path", nargs="?", default=".")
+    commit.add_argument(
+        "path", nargs="?", default=".", help="a file or folder; the closest repository above it is committed (default: the current folder)"
+    )
     commit.add_argument(
         "hint",
         nargs="?",
@@ -774,7 +778,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     # The same thing with the push forced on, for when that is what you mean.
     push_cmd = sub.add_parser("push", help="commit and push the closest repository above a path")
-    push_cmd.add_argument("path", nargs="?", default=".")
+    push_cmd.add_argument(
+        "path", nargs="?", default=".", help="a file or folder; the closest repository above it is committed (default: the current folder)"
+    )
     push_cmd.add_argument(
         "hint",
         nargs="?",

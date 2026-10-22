@@ -159,3 +159,17 @@ def test_nothing_listening_is_llm_unavailable(tmp_path):
 def test_unconfigured_llm_never_hits_the_network(tmp_path):
     with pytest.raises(LlmUnavailable, match="not configured"):
         suggest_commit_message(LlmConfig(), _tree(tmp_path))
+
+
+def test_errors_name_the_model_never_the_server_address(stub_server, tmp_path, monkeypatch):
+    monkeypatch.setattr(_Handler, "reply_status", 500)
+    monkeypatch.setattr(_Handler, "reply_body", {"error": f"bad request to {stub_server}"})
+    with pytest.raises(LlmUnavailable) as failed:
+        suggest_commit_message(LlmConfig(base_url=stub_server, model="qwen38"), _tree(tmp_path))
+    assert "qwen38" in str(failed.value)
+    assert "127.0.0.1" not in str(failed.value)
+
+    with pytest.raises(LlmUnavailable) as unreachable:
+        suggest_commit_message(LlmConfig(base_url="http://127.0.0.1:1/v1", model="qwen38", timeout_seconds=2), _tree(tmp_path))
+    assert "qwen38" in str(unreachable.value)
+    assert "127.0.0.1" not in str(unreachable.value)

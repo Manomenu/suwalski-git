@@ -24,7 +24,7 @@ from . import paths
 DEFAULT_INTERVAL_HOURS = 1.5
 # A thinking model reasons before it answers: qwen3-8b takes ~30 s on a small diff.
 DEFAULT_TIMEOUT_SECONDS = 180
-DEFAULT_MAX_DIFF_CHARS = 400_000
+DEFAULT_MAX_DIFF_CHARS = 200_000
 # A sweep leaves a repository alone while its files are still being touched.
 # Committing mid-edit yields half-finished commits described by a message
 # written about work that is not done yet. Three quarters of the interval, so a

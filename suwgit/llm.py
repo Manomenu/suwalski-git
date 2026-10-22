@@ -260,6 +260,11 @@ def _user_prompt(tree: WorkingTree, hint: str = "", tooling: str = "") -> str:
     prompt = (
         f"Repository: {tree.root.name}\n\ngit status --porcelain:\n{tree.status}\ngit diff --stat:\n{tree.stat}\ngit diff:\n{tree.diff}\n"
     )
+    if tree.merge:
+        prompt += (
+            f"\nThis commit finishes a merge (conflicts already resolved). Describe the merge, not the "
+            f"changes line by line:\n{tree.merge}\n"
+        )
     if tooling:
         prompt += f"\nThe project's top level and task files, for the commands that exist:\n{tooling}\n"
     if hint:
@@ -273,6 +278,11 @@ def _user_prompt(tree: WorkingTree, hint: str = "", tooling: str = "") -> str:
             f"{hint}\n"
         )
     return prompt
+
+
+def _anonymous(config: LlmConfig, text: str) -> str:
+    """`text` with the server's address replaced by the model's name: the address is private and never shown or logged."""
+    return text.replace(config.base_url, config.model) if config.base_url else text
 
 
 def _post(config: LlmConfig, payload: dict) -> dict:
@@ -289,11 +299,11 @@ def _post(config: LlmConfig, payload: dict) -> dict:
         with urllib.request.urlopen(request, timeout=config.timeout_seconds) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        raise _HttpFailure(exc.code, exc.read().decode("utf-8", errors="replace")[:300]) from None
+        raise _HttpFailure(exc.code, _anonymous(config, exc.read().decode("utf-8", errors="replace")[:300])) from None
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise LlmUnavailable(f"cannot reach {config.base_url}: {exc}") from None
+        raise LlmUnavailable(f"cannot reach {config.model}: {_anonymous(config, str(exc))}") from None
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise LlmUnavailable(f"unreadable answer from {config.base_url}: {exc}") from None
+        raise LlmUnavailable(f"unreadable answer from {config.model}: {exc}") from None
 
 
 def _content(answer: dict) -> str:
@@ -482,14 +492,14 @@ def _complete(config: LlmConfig, system: str, user: str, schema: dict) -> str:
         return _content(_post(config, payload))
     except _HttpFailure as exc:
         if exc.status not in (400, 404, 422, 501):
-            raise LlmUnavailable(f"HTTP {exc.status} from {config.base_url}: {exc.detail}") from None
+            raise LlmUnavailable(f"HTTP {exc.status} from {config.model}: {exc.detail}") from None
         # Old vLLM, or a proxy that rejects the extras: ask again with none of them.
         payload.pop("response_format")
         payload.pop("chat_template_kwargs")
         try:
             return _content(_post(config, payload))
         except _HttpFailure as retry_exc:
-            raise LlmUnavailable(f"HTTP {retry_exc.status} from {config.base_url}: {retry_exc.detail}") from None
+            raise LlmUnavailable(f"HTTP {retry_exc.status} from {config.model}: {retry_exc.detail}") from None
 
 
 def suggest_commit_message(

@@ -128,3 +128,134 @@ def test_files_inside_a_new_directory_are_visible(tmp_path):
 
     assert "deploy/conf/settings.py" in tree.status
     assert "TIMEOUT = 30" in tree.diff
+
+
+def _git_run(repo, *args):
+    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+
+def _commit_bytes(repo, name, data, message):
+    (repo / name).write_bytes(data)
+    _git_run(repo, "add", "-A")
+    _git_run(repo, "commit", "-qm", message)
+
+
+def test_output_that_is_not_utf8_does_not_crash(tmp_path):
+    """A Windows-1252 ellipsis (0x85) in an old commit once made every later commit fail."""
+    repo = _repo(tmp_path / "repo")
+    _commit_bytes(repo, "notes.md", b"wait\x85 what\n", "[docs] legacy encoding")
+    (repo / "notes.md").write_bytes(b"wait\x85 what\nmore\n")
+
+    tree = gitops.read_working_tree(repo)
+
+    assert "more" in tree.diff
+    assert gitops.exact_revert_of(repo) is None
+
+
+def test_an_exact_undo_of_a_non_utf8_commit_is_still_found(tmp_path):
+    repo = _repo(tmp_path / "repo")
+    _commit_bytes(repo, "a.txt", b"one\n", "[chore] init")
+    _commit_bytes(repo, "notes.md", b"wait\x85\n", "[docs] add notes")
+    (repo / "notes.md").unlink()
+
+    found = gitops.exact_revert_of(repo)
+
+    assert found is not None
+    assert found[1] == "[docs] add notes"
+
+
+def test_a_different_non_utf8_byte_is_not_an_undo(tmp_path):
+    """Bytes are compared as bytes: 0x86 is not the 0x85 that was added, though both decode to U+FFFD."""
+    repo = _repo(tmp_path / "repo")
+    _commit_bytes(repo, "a.txt", b"one\n", "[chore] init")
+    _commit_bytes(repo, "n.md", b"x\x85\n", "[docs] add notes")
+    (repo / "n.md").write_bytes(b"x\x86\n")
+    assert gitops.exact_revert_of(repo) is None
+    (repo / "n.md").unlink()
+    assert gitops.exact_revert_of(repo) is not None
+
+
+def test_exact_revert_does_not_diff_commits_that_cannot_match(tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    for index in range(5):
+        _commit_bytes(repo, f"f{index}.txt", b"x\n", f"[chore] add {index}")
+    (repo / "other.txt").write_text("unrelated\n")
+    patches = []
+    real = gitops._patch
+    monkeypatch.setattr(gitops, "_patch", lambda *a: patches.append(a) or real(*a))
+
+    assert gitops.exact_revert_of(repo) is None
+    assert patches == []  # only the cheap path/line-count comparison ran
+
+
+def test_a_deleted_lockfile_does_not_fill_the_prompt(tmp_path):
+    from suwgit import llm
+
+    repo = _repo(tmp_path / "repo")
+    (repo / "uv.lock").write_text("".join(f'[[package]]\nname = "pkg{i}"\nversion = "1.{i}"\n\n' for i in range(4400)))
+    (repo / "app.py").write_text("print(1)\n")
+    gitops.commit_all(repo, "[chore] init")
+    (repo / "uv.lock").unlink()
+    (repo / "app.py").write_text("print(2)\n")
+
+    tree = gitops.read_working_tree(repo, max_diff_chars=20_000)
+    prompt = llm._user_prompt(tree)
+
+    assert len(prompt) < 22_000
+    assert "uv.lock: deleted file, +0 -17600 lines" in tree.diff
+    assert "+print(2)" in tree.diff
+    assert "pkg4399" not in prompt
+
+
+def test_lockfiles_generated_and_binary_files_are_one_line_each(tmp_path):
+    repo = _repo(tmp_path / "repo")
+    (repo / ".gitattributes").write_text("gen.txt linguist-generated\nraw.txt -diff\n")
+    for name in ("package-lock.json", "gen.txt", "raw.txt", "logo.bin", "app.py"):
+        (repo / name).write_bytes(b"\0\1\2\n" if name == "logo.bin" else b"a\n")
+    gitops.commit_all(repo, "[chore] init")
+    for name in ("package-lock.json", "gen.txt", "raw.txt", "logo.bin", "app.py"):
+        (repo / name).write_bytes(b"\0\3\4\n" if name == "logo.bin" else b"b\n")
+
+    diff = gitops.read_working_tree(repo).diff
+
+    assert "package-lock.json: lockfile, +1 -1 lines" in diff
+    assert "gen.txt: generated file" in diff
+    assert "raw.txt: generated file" in diff
+    assert "logo.bin: binary file" in diff
+    assert "+b" in diff
+    assert diff.count("+b") == 1  # app.py only
+
+
+def test_a_new_lockfile_and_a_new_binary_are_not_previewed(tmp_path):
+    repo = _repo(tmp_path / "repo")
+    (repo / "keep.txt").write_text("x")
+    gitops.commit_all(repo, "[chore] init")
+    (repo / "yarn.lock").write_text("a\nb\n")
+    (repo / "pic.png").write_bytes(b"\x89PNG\0\0")
+
+    diff = gitops.read_working_tree(repo).diff
+
+    assert "yarn.lock: new lockfile or generated file, 2 lines" in diff
+    assert "pic.png: new binary file" in diff
+    assert "--- new file" not in diff
+
+
+def test_truncation_tells_the_model(tmp_path):
+    repo = _repo(tmp_path / "repo")
+    (repo / "big.txt").write_text("a\n")
+    gitops.commit_all(repo, "[chore] init")
+    (repo / "big.txt").write_text("line\n" * 5000)
+    diff = gitops.read_working_tree(repo, max_diff_chars=500).diff
+    assert "diff truncated at 500 characters" in diff
+
+
+def test_a_stale_origin_head_does_not_make_the_default_branch_look_like_a_feature(tmp_path):
+    repo = _repo(tmp_path / "repo")
+    (repo / "a.txt").write_text("x")
+    gitops.commit_all(repo, "[chore] init")
+    _git_run(repo, "remote", "add", "origin", "git@github.com:owner/repo.git")
+    _git_run(repo, "update-ref", "refs/remotes/origin/master", "HEAD")
+    _git_run(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/gone")
+
+    assert gitops.merge_request_url(repo, "origin", "master", "") == ""
+    assert gitops.merge_request_url(repo, "origin", "feat/x", "") == "https://github.com/owner/repo/pull/new/feat/x"

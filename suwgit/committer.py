@@ -46,6 +46,7 @@ def commit_repo(
     push_anyway: bool = False,
     review: bool = False,
     language: str = "en",
+    finish_merge: bool = False,
 ) -> Result:
     """Commit everything in `root` under an LLM-written message, then push it.
 
@@ -94,6 +95,10 @@ def commit_repo(
     pushed exactly as `git push` would, whether or not anything looks pending —
     a branch that only fast-forwarded onto a merge has nothing "unpushed" by the
     count above, and is still behind on its remote. The daemon never sets it.
+
+    `finish_merge` lets a merge whose conflicts are all resolved be committed
+    (both parents kept, as `git commit` does). Only a person asking by hand sets
+    it: the daemon leaves a merge alone, since a merge is a decision.
     """
     log = logger()
     should_push = config.push if push is None else push
@@ -102,13 +107,17 @@ def commit_repo(
     try:
         with repo_lock(root):
             interrupted = gitops.in_progress_operation(root)
-            if interrupted:
+            merging = interrupted == "MERGE_HEAD" and finish_merge
+            if interrupted and not merging:
                 log.info("%s: skipped, %s in progress", root, interrupted)
                 return Result(root, False, f"{interrupted} in progress")
+            if merging and (conflicted := gitops.unmerged_paths(root)):
+                log.info("%s: merge has unresolved conflicts: %s", root, ", ".join(conflicted))
+                return Result(root, False, "merge has unresolved conflicts: " + ", ".join(conflicted))
 
-            tree = gitops.read_working_tree(root, config.max_diff_chars)
+            tree = gitops.read_working_tree(root, config.max_diff_chars, merge=gitops.merge_brings(root) if merging else "")
 
-            if tree.is_dirty:
+            if tree.is_dirty or merging:
                 idle = gitops.seconds_since_last_change(root, tree.status)
                 if quiet_seconds and idle is not None and idle < quiet_seconds:
                     log.info(
@@ -123,7 +132,7 @@ def commit_repo(
                 # new work: committed as `git revert` would, never as B2B work,
                 # and the report marks the undone work. The model is still
                 # asked, for the secret check — an undo can bring one back.
-                undoes = gitops.exact_revert_of(root)
+                undoes = None if merging else gitops.exact_revert_of(root)
                 suggestion = suggest_commit_message(
                     config.llm, tree, b2b=bool(tenant) and not undoes, hint=hint, review=review, language=language
                 )

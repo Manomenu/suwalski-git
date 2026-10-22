@@ -137,3 +137,25 @@ def test_project_tooling_shows_the_commands_that_exist(tmp_path):
 
     assert "src/" in text and "check:\n    pytest" in text and '"test": "vitest"' in text
     assert "dependencies" not in text
+
+
+def test_a_clean_repository_prints_no_asking_line(sandbox, tmp_path, monkeypatch, capsys):
+    from suwgit import config as config_module
+
+    repo = _repo(tmp_path / "repo")
+    gitops.commit_all(repo, "[chore] init")
+    monkeypatch.setattr(config_module, "load", lambda: Config(llm=LLM))
+    monkeypatch.setattr(main, "commit_repo", lambda cfg, root, **kw: committer.Result(root, False, "nothing to commit"))
+
+    main.main(["commit", str(repo)])
+    assert "asking" not in capsys.readouterr().out
+
+    (repo / "a.txt").write_text("changed")
+    main.main(["commit", str(repo)])
+    assert "asking" in capsys.readouterr().out
+
+
+def test_commit_help_describes_the_path(capsys):
+    with pytest.raises(SystemExit):
+        main.main(["commit", "--help"])
+    assert "closest repository above it" in capsys.readouterr().out

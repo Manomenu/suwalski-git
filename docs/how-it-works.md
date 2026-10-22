@@ -39,12 +39,19 @@ built, and where everything lives. For using it, see the [README](../README.md).
 `commit_repo` runs, under a per-repository lock:
 
 1. **Skip a repository in the middle of something.** A merge, rebase,
-   cherry-pick, revert or bisect in progress is not suwgit's to commit.
+   cherry-pick, revert or bisect in progress is not suwgit's to commit. The one
+   exception is a merge whose conflicts are all resolved, finished by an explicit
+   `suwgit commit` or `push` (never by the daemon): the commit keeps both parents,
+   and the model is told the merged branch and the subjects of the commits it
+   brings. A merge with unresolved conflicts is refused, naming the files.
 2. **Read the working tree.** `git status --porcelain --untracked-files=all`,
    `git diff HEAD --stat` and `git diff HEAD`, plus the first 30 lines of up to
-   40 new files (untracked files never show up in `git diff`). The diff is cut
-   at `max_diff_chars`, but the status list is always sent in full, so the model
-   still sees every file that changed.
+   40 new files (untracked files never show up in `git diff`). Deleted files,
+   lockfiles (`uv.lock`, `package-lock.json`, `*.lock`, …), files marked `-diff`
+   or `linguist-generated` in `.gitattributes`, and binary files are one line
+   each instead of a diff. The rest is cut at `max_diff_chars`, with a note, but
+   the status list is always sent in full, so the model still sees every file
+   that changed.
 3. **Wait while files are still being edited** (daemon only). If any dirty file
    was modified within the last three quarters of the interval, the sweep leaves
    the repository for the next one. `suwgit commit` passes no wait: asking for a
@@ -330,7 +337,7 @@ writes nothing.
   "interval_hours": 1.5,
   "open_on_system_start": true,
   "push": false,
-  "max_diff_chars": 400000,
+  "max_diff_chars": 200000,
   "report_author": "Piotr Gugnowski",
   "mailboxes": [
     {"host": "smtp.gmail.com", "port": 587, "security": "starttls", "username": "you@gmail.com", "sender": "you@gmail.com"}
@@ -350,7 +357,7 @@ writes nothing.
 | `interval_hours` | how often the daemon sweeps |
 | `open_on_system_start` | whether the systemd unit is enabled |
 | `push` | push after each commit, sweeps included |
-| `max_diff_chars` | how much diff the model reads; the default sends the whole diff in almost every case |
+| `max_diff_chars` | how much diff (in characters) the model reads, after lockfiles, deleted and binary files are summarized; keep it well under the model's context window (a lockfile is about 2 characters a token) |
 | `report_author` | the "Prepared by" name on reports; empty means the commits' author names |
 | `language` | `en` or `pl`: the language of commits in a repository registered without `--language`, or not registered |
 | `mailboxes` | the mailboxes `report --mail` can send from; `init` and `add-mail` add them. Passwords are never stored here (see below). A config with one `mail` object, as before, still loads |
