@@ -6,8 +6,9 @@ from suwgit import config as config_module
 from suwgit import initcmd, install
 
 
-def _run(monkeypatch, answers):
+def _run(monkeypatch, answers, windows=False):
     """Run init with these answers, in order; Enter for every question past the list."""
+    monkeypatch.setattr(initcmd.host, "is_windows", lambda: windows)  # Linux also asks where the config lives
     queue = list(answers)
     monkeypatch.setattr("builtins.input", lambda prompt="": queue.pop(0) if queue else "")
     monkeypatch.setattr(install, "link_into_path", lambda: (True, "linked"))
@@ -66,9 +67,8 @@ def test_dotfiles_mode_keeps_the_config_when_stow_folded_the_whole_folder(sandbo
 
 def test_windows_is_not_asked_where_the_config_lives(sandbox, monkeypatch):
     """The dotfiles tree is a Linux (GNU Stow) setup: on Windows the first answer is already the server."""
-    monkeypatch.setattr(initcmd.host, "is_windows", lambda: True)
     config_module.save(_existing())
-    loaded = _run(monkeypatch, ["http://other:8000/v1"])
+    loaded = _run(monkeypatch, ["http://other:8000/v1"], windows=True)
 
     assert loaded.llm.base_url == "http://other:8000/v1"
     assert config_module.paths.CONFIG_FILE.exists()

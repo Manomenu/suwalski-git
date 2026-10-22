@@ -1,10 +1,11 @@
 """Config round-trips, and the two things that are easy to get wrong:
 the API key must not land in the file, and a save must follow a stow symlink."""
 
+import json
 from pathlib import Path
 
 from suwgit import config as config_module
-from suwgit import paths
+from suwgit import host, paths
 
 
 def _config():
@@ -27,7 +28,8 @@ def test_api_key_stays_out_of_the_config_file(sandbox):
     config_module.save(_config())
     assert "secret" not in paths.CONFIG_FILE.read_text()
     assert paths.API_KEY_FILE.read_text().strip() == "secret"
-    assert paths.API_KEY_FILE.stat().st_mode & 0o777 == 0o600
+    if not host.is_windows():  # Windows has no chmod; the profile folder is private instead
+        assert paths.API_KEY_FILE.stat().st_mode & 0o777 == 0o600
     assert config_module.load().llm.api_key == "secret"
 
 
@@ -89,7 +91,7 @@ def test_registry_settings_round_trip(sandbox):
 
 def test_an_older_config_with_bare_paths_still_loads(sandbox):
     paths.CONFIG_FILE.parent.mkdir(parents=True)
-    paths.CONFIG_FILE.write_text('{"repos": ["/a/repo"]}')
+    paths.CONFIG_FILE.write_text(json.dumps({"repos": [str(Path("/a/repo"))]}))
     entry = config_module.load().entry(Path("/a/repo"))
     assert (entry.auto_commit, entry.default_tenant) == (True, "")
 

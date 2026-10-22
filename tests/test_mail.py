@@ -14,7 +14,7 @@ from typing import ClassVar
 
 import pytest
 
-from suwgit import b2b, config, initcmd, install, mailer, main, paths, picker, tenants
+from suwgit import b2b, config, host, initcmd, install, mailer, main, paths, picker, tenants
 from suwgit.config import Config, LlmConfig, MailConfig
 
 MAILBOX = MailConfig(host="127.0.0.1", port=2525, security="none", username="", sender="me@example.com")
@@ -66,7 +66,8 @@ def test_passwords_stay_out_of_the_config_one_per_mailbox(sandbox):
 
     text = paths.CONFIG_FILE.read_text()
     assert "s3cret" not in text and '"password"' not in text
-    assert paths.MAIL_PASSWORDS_FILE.stat().st_mode & 0o777 == 0o600
+    if not host.is_windows():  # Windows has no chmod; the profile folder is private instead
+        assert paths.MAIL_PASSWORDS_FILE.stat().st_mode & 0o777 == 0o600
     loaded = config.load().mailboxes
     assert [(b.sender, b.password) for b in loaded] == [("me@gmail.com", "s3cret one"), ("me@work.com", "w")]
 
@@ -103,6 +104,7 @@ def test_add_replaces_the_same_sender_and_remove_forgets_it(sandbox):
 
 def _init(monkeypatch, answers, secret=""):
     _answers(monkeypatch, *answers)
+    monkeypatch.setattr(host, "is_windows", lambda: False)  # the first answer is the config location
     monkeypatch.setattr(initcmd.getpass, "getpass", lambda prompt="": secret)
     monkeypatch.setattr(install, "link_into_path", lambda: (True, "linked"))
     monkeypatch.setattr(install, "install_schedule", lambda hours, enabled: (True, "installed"))

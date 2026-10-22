@@ -224,7 +224,7 @@ def test_nothing_in_the_codebase_can_force_push():
     """The guarantee, pinned: no force flag reaches git, ever."""
     source = (Path(gitops.__file__).parent).glob("*.py")
     for module in source:
-        text = module.read_text()
+        text = module.read_text(encoding="utf-8")
         assert "--force" not in text, module
         assert "force-with-lease" not in text, module
 

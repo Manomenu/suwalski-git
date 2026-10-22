@@ -408,9 +408,9 @@ def test_without_a_default_project_the_folder_name_is_used_later(sandbox):
 
 def test_a_bare_b2b_with_no_default_says_how_to_set_one(sandbox):
     with pytest.raises(ValueError) as exc:
-        _resolve(["push", "--b2b"], RepoEntry("/r/shop"))
+        _resolve(["push", "--b2b"], RepoEntry(str(Path("/r/shop"))))  # a path the way the system spells it
     assert "suwgit push --b2b lokum" in str(exc.value)
-    assert "suwgit register /r/shop --default-b2b lokum" in str(exc.value)
+    assert f"suwgit register {Path('/r/shop')} --default-b2b lokum" in str(exc.value)
 
 
 def test_a_bare_project_with_no_default_says_how_to_set_one(sandbox):
@@ -546,7 +546,10 @@ def test_list_shows_every_tenant_with_its_folders_and_projects(sandbox, monkeypa
     tenants.record("acme", Path("/r/shared"))
     tenants.remember(Path("/r/shared"), "acme", "Acme CRM")
     config = _config(
-        repos=[RepoEntry("/r/shop", default_tenant="lokum", default_project="Lokum Shop"), RepoEntry("/r/api", default_tenant="lokum")]
+        repos=[
+            RepoEntry(str(Path("/r/shop")), default_tenant="lokum", default_project="Lokum Shop"),
+            RepoEntry(str(Path("/r/api")), default_tenant="lokum"),
+        ]
     )
     monkeypatch.setattr(main.config_module, "load", lambda: config)
     monkeypatch.setattr(main.install, "schedule_status", lambda: "active")
